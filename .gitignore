@@ -2,6 +2,12 @@
 *.log
 *.swp
 *.bak
+*.sjsir
+*.prefs
+.project
+.classpath
+.history
+.cache-main
 
 # sbt specific
 .cache/
@@ -11,6 +17,20 @@ dist/*
 target/resolution-cache/
 target/scala-2.11/
 target/streams/
+app/jvm/target/resolution-cache/
+app/jvm/target/scala-2.11/
+app/jvm/target/streams/
+app/js/target/resolution-cache/
+app/js/target/scala-2.11/
+app/js/target/streams/
+project/project/target/resolution-cache/
+project/project/target/scala-2.11/
+project/project/target/streams/
+project/project/target/config-classes/
+project/target/resolution-cache/
+project/target/scala-2.11/
+project/target/streams/
+project/target/config-classes/
 lib_managed/
 src_managed/
 project/boot/
