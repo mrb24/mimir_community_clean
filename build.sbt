@@ -20,6 +20,9 @@ scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature",
 val scalajsReactVersion = "0.11.3"
 val scalaCSSVersion = "0.5.1"
 
+resolvers += "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository"
+resolvers += Resolver.mavenLocal
+resolvers += "MimirDB" at "http://maven.mimirdb.info/"
 
 val app = crossProject.settings(
   unmanagedSourceDirectories in Compile +=
@@ -49,6 +52,7 @@ val app = crossProject.settings(
 	"org.eclipse.jetty" % "jetty-servlet" % "9.3.11.v20160721",
 	"org.eclipse.jetty" % "jetty-servlets" % "9.3.11.v20160721",
 	"org.eclipse.jetty" % "jetty-util" % "9.3.11.v20160721",
+	"org.eclipse.jetty.websocket" % "websocket-server" % "9.3.11.v20160721",
 	"org.bouncycastle" % "bcpkix-jdk15on" % "1.55",
 	"org.bouncycastle" % "bcprov-jdk15on" % "1.55",
 	"org.apache.commons" % "commons-dbcp2" % "2.1.1",
@@ -66,13 +70,14 @@ val app = crossProject.settings(
 	"org.scalikejdbc" %% "scalikejdbc-jsr310" % "2.4.2",
 	"com.lihaoyi" %%% "upickle" % "0.2.7",
 	"com.lihaoyi" %%% "scalatags" % "0.5.4",
-	"org.slf4j" % "slf4j-api" % "1.7.21",
-	"org.slf4j" % "slf4j-simple" % "1.7.21",
+	//"org.slf4j" % "slf4j-api" % "1.7.21",
+	//"org.slf4j" % "slf4j-simple" % "1.7.21",
 	"org.scala-js"   %% "scalajs-test-interface" % "0.6.14",
 	"org.scala-lang" % "scala-reflect" % scalaVersion.value,
     "org.scala-lang" % "scala-compiler" % scalaVersion.value % Provided,
-    "org.xerial"     %   "sqlite-jdbc"  % "3.16.1"
-  
+    "org.xerial"     %   "sqlite-jdbc"  % "3.16.1",
+  	"info.mimirdb" %% "mimir-core" % "0.2",
+  	"net.sf.py4j" % "py4j" % "0.10.4"
   )
 )
 

@@ -17,6 +17,11 @@ import org.eclipse.jetty.server.handler.ContextHandler
 import org.eclipse.jetty.server.handler.DefaultHandler
 import org.eclipse.jetty.server.handler.HandlerCollection
 import org.eclipse.jetty.server.Handler
+import org.eclipse.jetty.websocket.api.Session
+import org.eclipse.jetty.websocket.api.WebSocketAdapter
+import org.eclipse.jetty.websocket.server.WebSocketHandler
+import org.eclipse.jetty.websocket.servlet.WebSocketServlet
+import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory
 import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
 import java.util.ArrayList
@@ -39,12 +44,20 @@ class MainServlet() extends HttpServlet {
       val routePattern = "\\/ajax\\/([a-zA-Z]+)".r
       req.getPathInfo match {
         case routePattern(route) => {
-          val responseObj = handleRequest(route, text)
-          val os = resp.getOutputStream()
-          resp.setHeader("Content-type", "text/html");
-          os.write(responseObj.getBytes )
-          os.flush()
-          os.close() 
+          try{
+            val request = upickle.read[AjaxRequestWrapper](text)
+            val responseObj = SharedServlet.handleRequest(route, request.request)
+            val os = resp.getOutputStream()
+            resp.setHeader("Content-type", "text/html");
+            os.write(UBOdinAjaxResponse.writeResponse(responseObj).getBytes )
+            os.flush()
+            os.close() 
+          } catch {
+            case t: Throwable => {
+              t.printStackTrace() 
+              throw t
+            }
+          }
         }
         case _ => throw new Exception("request Not handled: " + req.getPathInfo)
       }  
@@ -65,44 +78,94 @@ class MainServlet() extends HttpServlet {
             os.close()
             println("Response Written: " + responseStr.length())
   }
+}
+
+class MCCWebSocket extends WebSocketAdapter
+{
+    
+    override def onWebSocketClose(statusCode:Int,  reason:String) : Unit = {
+        super.onWebSocketClose(statusCode,reason);
+        println("WebSocket Close: "+statusCode+" - "+reason);
+    }
+
+    override def  onWebSocketConnect( session:Session) : Unit = {
+        super.onWebSocketConnect(session);
+        println("WebSocket Connect: " + session);
+    }
+
+    override def onWebSocketError( cause:Throwable) : Unit = {
+    	println("WebSocket Error "+cause);
+    }
+
+    override def  onWebSocketText( message:String) : Unit = {
+        if (isConnected())
+        {
+          val request = upickle.read[WSRequestWrapper](message)
+          println(request.deviceID + ": "+request.requestType)
+          SharedServlet.webSocketConnections.get(request.deviceID) match {
+            case None => SharedServlet.webSocketConnections(request.deviceID) = this
+            case Some(ws) => {}
+          }
+            val routePattern = "([a-zA-Z]+)".r
+            request.requestType match {
+              case routePattern(route) => {
+                val responseObj = SharedServlet.handleRequest(route, request.request)
+                sendMessage(responseObj, Some(request.requestUID))
+              }
+              case _ => throw new Exception("request Not handled: " + request.deviceID + ": "+request.requestType)
+            }  
+            
+        }
+    }
+
+    override def  onWebSocketBinary(arg0:Array[Byte], arg1:Int, arg2:Int) : Unit = {
+    	println("binary message "+new String(arg0));
+    }
+    
+    def sendMessage(msg:UBOdinAjaxResponse, requestUID:Option[Int]) : Unit = {
+      getRemote().sendStringByFuture(upickle.write(WSResponseWrapper(msg.responseID, requestUID.getOrElse(-1), UBOdinAjaxResponse.writeResponse(msg))))
+    }
+}
   
+object SharedServlet {
+  val webSocketConnections = scala.collection.mutable.Map[String,MCCWebSocket]()
   
-  def handleRequest(route:String, request:String) : String = {
+  def handleRequest(route:String, request:String) : UBOdinAjaxResponse = {
    
     val requestObj = UBOdinAjaxRequest.readRequest(route, request)
           
     requestObj match {
       case CleaningJobListRequest(deviceID) =>  {
         val cleaningJobs = getCleaningJobList(deviceID)
-        upickle.write(CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs)))
+        (CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs)))
       }
       case CleaningJobTaskListRequest(deviceID, cleaningJobID, count, offset) =>  {
         val cleaningJobs = getCleaningJobTaskList(deviceID, cleaningJobID, count, offset)
-        upickle.write(CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
+        (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
       }
       case CleaningJobTaskFocusedListRequest(deviceID, cleaningJobID, rowIds, cols) =>  {
         val cleaningJobs = getCleaningJobTaskFocusedList(deviceID, cleaningJobID, rowIds, cols)
-        upickle.write(CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
+        (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
       }
       case CleaningJobDataRequest(deviceID, cleaningJobID, count, offset) =>  {
         val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, count, offset)
-        upickle.write(CleaningJobDataResponse(cleaningJobData))
+        (CleaningJobDataResponse(cleaningJobData))
       }
       case filterReq@CreateCleaningJobLocationFilterSettingRequest(deviceID, cleaningJobDataID, name, distance, latCol, lonCol, lat, lon) =>  {
         createCleaningJobLocationFilterSetting(filterReq)
-        upickle.write(NoResponse())
+        (NoResponse())
       }
       case filterReq@RemoveCleaningJobLocationFilterSettingRequest(deviceID, cleaningJobDataID, name) =>  {
         removeCleaningJobLocationFilterSetting(filterReq)
-        upickle.write(NoResponse())
+        (NoResponse())
       }
       case GetCleaningJobSettingsRequest(deviceID, cleaningJobID) =>  {
         val cleaningJobSettings = getCleaningJobSettings(deviceID, cleaningJobID)
-        upickle.write(GetCleaningJobSettingsResponse(cleaningJobSettings.toVector))
+        (GetCleaningJobSettingsResponse(cleaningJobSettings.toVector))
       }
       case GetCleaningJobSettingsOptionsRequest(cleaningJobID) =>  {
         val cleaningJobSettingsOptions = getCleaningJobSettingsOptions(cleaningJobID)
-        upickle.write(GetCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptions.toVector))
+        (GetCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptions.toVector))
       }
       case LoadCleaningJobRequest(deviceID, cleaningJobID) =>  {
         val cleaningJobSettingsOptions = getCleaningJobSettingsOptions(cleaningJobID)
@@ -113,23 +176,27 @@ class MainServlet() extends HttpServlet {
         val tasks = CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobTasks))
         val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, None, None)
         val data = CleaningJobDataResponse(cleaningJobData)
-        upickle.write(LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, data))
+        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, data))
       }
       case UserInfoRequest(deviceID) => {
-        upickle.write(UserInfoResponse(getUserInfo(deviceID).head))
+        (UserInfoResponse(getUserInfo(deviceID).head))
       }
       case SetDeviceLocationRequest(deviceID, lat, lon) => {
         setDeviceLocation(deviceID, lat, lon) 
-        upickle.write(NoResponse())
+        (NoResponse())
       }
       case LoginRequest(deviceID) => {
         val cleaningJobs = getCleaningJobList(deviceID)
-        upickle.write(LoginResponse(UserInfoResponse(getUserInfo(deviceID).head), CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs))))
+        (LoginResponse(UserInfoResponse(getUserInfo(deviceID).head), CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs))))
       }
       case CleaningJobRepairRequest(deviceID, cleaningJobID, model, idx, args, repairValue) => {
         println(s"Repair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, repair:$repairValue")
         MimirCommunityServer.feedback(model, idx, args, repairValue)
-         upickle.write(NoResponse())
+        (NoResponse())
+      }
+      case NoRequest() => {
+        println("No Op Request")
+        (NoResponse())
       }
       case x => {
         throw new Exception("request Not handled: " + x)
@@ -387,6 +454,7 @@ class MainServlet() extends HttpServlet {
   }
 }
 
+
 object MimirCommunityServer {
   def main(args: Array[String]) : Unit = {
     DatabaseManager.connectDatabases()
@@ -489,6 +557,17 @@ object MimirCommunityServer {
     servletContextHandler.setContextPath("/");
     val holder = new ServletHolder(theServlet);
     servletContextHandler.addServlet(holder, "/*");
+    
+    val wsHandler = new WebSocketServlet()
+	    {
+	        override def configure(factory:WebSocketServletFactory )
+	        {
+	            factory.getPolicy().setIdleTimeout(500000);
+	            factory.register(classOf[MCCWebSocket]);
+	        }
+	    }
+    val wsholder = new ServletHolder(wsHandler);
+    servletContextHandler.addServlet(wsholder, "/ws/*");
     
     val handlerList = new HandlerCollection();
     handlerList.setHandlers( Array[Handler](contextHandler, contextHandler2, servletContextHandler, new DefaultHandler()));
@@ -605,7 +684,7 @@ object MimirCommunityServer {
     val execQueue = new LinkedBlockingQueue[MimirRunnable[_]]()
     val returnQueue = new LinkedBlockingQueue[Any]()
     override def run() = {
-      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG","GPROM-PROVENANCE", "NO-VISTRAILS"))
+      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-PROVENANCE"*/, "NO-VISTRAILS", "QUIET-LOG"))
       while(true){
         val runnable = execQueue.take()
         runnable.run()

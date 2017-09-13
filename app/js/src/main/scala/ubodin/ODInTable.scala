@@ -113,7 +113,7 @@ object ODInTable {
       t.modState(_.copy(filteredModels = getFilteredModels(value, P.data), offset = 0))
 
     def onPreviousClick(P: Props): Callback =
-      t.modState(s => s.copy(offset = s.offset - s.rowsPerPage), t.state.flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset, s.offset - s.rowsPerPage)))) //>>  t.state.map(s => s).flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset, s.offset - s.rowsPerPage) )  )  
+      t.modState(s => s.copy(offset = s.offset - s.rowsPerPage), t.state.flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset , s.offset + s.rowsPerPage )))) //>>  t.state.map(s => s).flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset, s.offset - s.rowsPerPage) )  )  
 
     def onNextClick(P: Props): Callback =
       t.modState(s => s.copy(offset = s.offset + s.rowsPerPage), t.state.flatMap( s => P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + s.rowsPerPage)))) //>>  t.state.flatMap( s => P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + s.rowsPerPage) )  )

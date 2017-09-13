@@ -80,8 +80,8 @@ object UBOdinHomePage {
     def requestCleaningJobList(deviceID:String) : Callback =  {
       val url = "/ajax/LoginRequest"
       val data = upickle.write(LoginRequest(deviceID))
-
-      Callback.future(Ajax.post(url, data).map { xhr =>
+      val req = upickle.write(AjaxRequestWrapper(deviceID, "LoginRequest", data))
+      Callback.future(Ajax.post(url, req).map { xhr =>
         updateStateFromAjaxCall(xhr.responseText, t) 
       })
     }

@@ -59,3 +59,6 @@ case class LoadCleaningJobRequest(deviceID:String, cleaningJobID: String) extend
 case class SetDeviceLocationRequest(deviceID:String, lat:Double, lon:Double) extends UBOdinAjaxRequest("SetDeviceLocationRequest") 
 
 case class CleaningJobRepairRequest(deviceID:String, cleaningJobID:String, model:String, idx:Int, args:Seq[String], repairValue:String) extends UBOdinAjaxRequest("CleaningJobRepairRequest") 
+
+case class AjaxRequestWrapper(deviceID:String, requestType:String, request:String)
+case class WSRequestWrapper(deviceID:String, requestType:String, requestUID:Int, request:String)

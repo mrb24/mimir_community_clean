@@ -21,6 +21,9 @@ import ubodin.ODInTable.Model
 import scalacss.Defaults._
 import scalacss.ScalaCssReact._
 
+import org.scalajs.dom.{WebSocket, MessageEvent, Event, CloseEvent, ErrorEvent}
+import scala.util.{Success, Failure}
+
 object UBOdinCleaningJobPage {
   import RCustomStyles._
   import Mui.SvgIcons.{ ActionInfo, AlertWarning, ActionInfoOutline, AlertError, AlertErrorOutline, ActionCheckCircle }
@@ -95,7 +98,7 @@ object UBOdinCleaningJobPage {
   }
   
   case class State(cleaningJobType:String = "",
-                   progressState:ProgressState = ProgressState(false),
+                   progressState:ProgressState = ProgressState(0),
                    gpsState:GPSLocationState = GPSLocationState(false, LatLng(42.8864 ,-78.8784), None),
                    latLonColsState:LatLonColsState = LatLonColsState("LATITUDE","LONGITUDE",4,5),
                    addrColsState:AddressColsState = AddressColsState("STRNUMBER","STRNAME","CITY","STATE",0,1,3,2),
@@ -114,12 +117,17 @@ object UBOdinCleaningJobPage {
                    mapState:MapState = MapState( LatLng(42.8864 ,-78.8784), List() , 14, true),
                    addressState:AddressState = AddressState("","","",""),
                    baseTheme: MuiRawTheme = Mui.Styles.LightRawTheme,
-                   backgroundColor: js.UndefOr[MuiColor] = js.undefined
+                   backgroundColor: js.UndefOr[MuiColor] = js.undefined,
+                   webSocketState: WebSocketState = WebSocketState(0, None, scala.collection.mutable.Map())
                    ){
   val theme: MuiTheme =
     Mui.Styles.getMuiTheme(backgroundColor.fold(baseTheme)(
       color ⇒ baseTheme.copy(palette = baseTheme.palette.copy(canvasColor = color)))
     )
+  def wslog(msg:String) = {
+    Callback.info(msg).runNow()
+    copy()
+  }
 }
 
   case class GPSLocationState(enabled:Boolean, homeLocation: LatLng, location:Option[LatLng])
@@ -135,7 +143,8 @@ object UBOdinCleaningJobPage {
   case class DrawerState(choices:Seq[MainMenuChoice], selected:Seq[String], selectedWaitingCallback:Option[MainMenuChoice] = None, open:Boolean, docked:Boolean, right:Boolean)
   case class MapState(center:LatLng, markers: List[Marker], zoom:Int, cluster:Boolean)  
   case class AddressState(houseNumber:String, streetName:String, city:String, state:String)
-  case class ProgressState(loading:Boolean)
+  case class ProgressState(loading:Int)
+  case class WebSocketState(outMessageCount:Int, ws:Option[WebSocket], handlers:scala.collection.mutable.Map[Int, String => Callback])
   
   case class MainMenuChoice(id: String, text: String, settingOption:Option[SettingOption])
     
@@ -169,20 +178,125 @@ object UBOdinCleaningJobPage {
     }
     
     ///------------------------------------
+    /// WebSocket Code
+    ///------------------------------------
+    val wsurl = "wss://localhost:8089/ws/"
+    def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
+       t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
+           case None => s.webSocketState.handlers
+           case Some(cb) => s.webSocketState.handlers += (s.webSocketState.outMessageCount + 1) -> cb
+         } )).wslog(s"sending web socket request: $requestType") , t.state.flatMap( s => {
+            val req = upickle.write(WSRequestWrapper(deviceFingerprint, requestType, s.webSocketState.outMessageCount, msg)) 
+            Callback(ws.send(req))
+          }))
+    } 
+    
+      def createWebSocket(successCB:Option[(String, String => Callback)] = None, failureCB:Option[(String, String => Callback)], openCB:Option[(String, String => Callback)] = None): Callback = {
+    
+        // This will establish the connection and return the WebSocket
+        def connect = CallbackTo[WebSocket] {
+    
+          // Get direct access so WebSockets API can modify state directly
+          // (for access outside of a normal DOM/React callback).
+          // This means that calls like .setState will now return Unit instead of Callback.
+          val direct = t.accessDirect
+          def defaultHandler(cb:Callback) : String => Callback = str => cb
+          // These are message-receiving events from the WebSocket "thread".
+          def onmessage(e: MessageEvent): Unit = {
+            val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
+            direct.modState(_.copy().wslog(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType} Size: ${respWrapped.response.length()}"),
+            (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, {
+              val resp = UBOdinAjaxResponse.readResponse(respWrapped.responseType, respWrapped.response)
+              resp match {
+                case response:NoResponse => defaultHandler( Callback.info("WS NoResponse"))
+                case response:CleaningJobTaskListResponse => defaultHandler(cleaningJobTaskListResponse(response, t))
+                case response:CleaningJobDataResponse => defaultHandler(cleaningJobDataResponse(response, t))
+                case response:GetCleaningJobSettingsResponse => defaultHandler(getCleaningJobSettingsResponse(response, t))
+                case response:GetCleaningJobSettingsOptionsResponse => defaultHandler(getCleaningJobSettingsOptionsResponse(response, t))
+                case response:LoadCleaningJobResponse => defaultHandler( 
+                  t.modState(s => s.copy(cleaningJobType = response.job.jobType),
+                  getCleaningJobSettingsOptionsResponse(response.options, t ) >>
+                  getCleaningJobSettingsResponse(response.settings, t ) >>
+                  cleaningJobDataResponse(response.data, t)))
+                case x => defaultHandler( Callback.warn("WS Response Not Handled: " + x.toString()) )
+              }
+            })(respWrapped.response)) >> t.modState(s=>s.copy(progressState = ProgressState(s.progressState.loading -1), webSocketState = s.webSocketState.copy(handlers = (s.webSocketState.handlers -= respWrapped.responseUID)))))
+          }
+    
+          def onerror(e: ErrorEvent): Unit = {
+            // Display error message
+            direct.modState(_.wslog(s"Error: ${e}"))
+          }
+    
+          def onclose(e: CloseEvent): Unit = {
+            // Close the connection
+            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"))
+          }
+    
+          // Create WebSocket and setup listeners
+          val ws = new WebSocket(wsurl)
+          ws.onopen = onopen _
+          ws.onclose = onclose _
+          ws.onmessage = onmessage _
+          ws.onerror = onerror _
+          
+          def onopen(e: Event): Unit = {
+            wsRequest(ws, "NoRequest", upickle.write(NoRequest())).runNow()
+            openCB match {
+              case Some((str, cb)) => direct.modState(_.wslog("Connected."), cb(str))
+              case None => direct.modState(_.wslog("Connected."))
+            }
+          }
+          
+          ws
+        }
+    
+        // Here use attemptTry to catch any exceptions in connect.
+        connect.attemptTry.flatMap {
+          case Success(ws)    => successCB match {
+            case Some((str, cb)) => t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = Some(ws))), cb(str))
+            case None => t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = Some(ws))))
+          }
+          case Failure(error) => failureCB match {
+            case Some((str,cb)) => cb(str)
+            case None => Callback.info(error.toString)
+          }
+        }
+      }
+    
+      def killWebSocket: Callback = {
+        def closeWebSocket = t.state.map(_.webSocketState.ws.foreach(_.close()))
+        def clearWebSocket = t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)))
+        closeWebSocket >> clearWebSocket
+      }
+    
+    
+    ///------------------------------------
     ///  Ajax Loading Code
     ///------------------------------------
-    def ajaxRequest(url:String, data:String, cb:dom.XMLHttpRequest => Callback ): Callback = {
-      t.modState(s => s.copy(progressState = ProgressState(true))) >>
-      Callback.future(Ajax.post(url, data).map { xhr =>
-        cb(xhr) >> t.modState(s => s.copy(progressState = ProgressState(false)))
+    def ajaxRequest(url:String, data:String, cb:String => Callback ): Callback = {
+      t.state.flatMap( s => {
+        s.webSocketState.ws match {
+          case Some(webSoc) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
+          case None => ajaxRequesta(url, data, cb)
+        }
+      })
+    }
+      
+    def ajaxRequesta(url:String, data:String, cb:String => Callback ): Callback = {
+      val reqType = url.split("/").last
+      val req = upickle.write(AjaxRequestWrapper(deviceFingerprint, reqType, data))
+      t.modState(s => s.copy(progressState = ProgressState(s.progressState.loading +1)).wslog(s"sending ajax request: $reqType")) >>
+      Callback.future(Ajax.post(url, req).map { xhr =>
+        cb(xhr.responseText) >> t.modState(s => s.copy(progressState = ProgressState(s.progressState.loading-1)))
       })
     }
     
     def requestSetDeviceLocation(lat:Double, lon:Double) : Callback = {
       val url = "/ajax/SetDeviceLocationRequest"
       val data = upickle.write(SetDeviceLocationRequest(deviceFingerprint, lat, lon))
-      ajaxRequest(url, data, xhr => {
-        val setDeviceLocation = upickle.read[NoResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val setDeviceLocation = upickle.read[NoResponse](responseText)
         Callback.info("Device Location Set On Server...")
       })
     }
@@ -190,20 +304,20 @@ object UBOdinCleaningJobPage {
     def requestLoadCleaningJob(cleaningJobID:String) : Callback = {
       val url = "/ajax/LoadCleaningJobRequest"
       val data = upickle.write(LoadCleaningJobRequest(deviceFingerprint, cleaningJobID))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobLoadResponse = upickle.read[LoadCleaningJobResponse](xhr.responseText)
-        t.modState(s => s.copy(cleaningJobType = cleaningJobLoadResponse.job.jobType)) >>
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobLoadResponse = upickle.read[LoadCleaningJobResponse](responseText)
+        t.modState(s => s.copy(cleaningJobType = cleaningJobLoadResponse.job.jobType),
         getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >>
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
-        cleaningJobDataResponse(cleaningJobLoadResponse.data, t)
+        cleaningJobDataResponse(cleaningJobLoadResponse.data, t))
       })
     }
     
     def requestCleaningJobTaskList(cleaningJobID:String, count:Int, offset:Int) : Callback = {
       val url = "/ajax/CleaningJobTaskListRequest"
       val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, count, offset))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
         //cleaningJobTaskTreeResponse(xhr.responseText, t) 
       })
@@ -212,8 +326,8 @@ object UBOdinCleaningJobPage {
     def requestCleaningJobTaskFocusedList(cleaningJobID:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
       val url = "/ajax/CleaningJobTaskFocusedListRequest"
       val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, rowIDs, cols))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
         //cleaningJobTaskTreeResponse(xhr.responseText, t) 
       })
@@ -234,15 +348,14 @@ object UBOdinCleaningJobPage {
       //val curQuizItem = scope.state.currentQuizItem
       println("cleaningJobTaskListResponse: " )
       val newListData = cleaningJobTaskListResponse.cleaningJobTasks.toList
-     
       t.modState(s => s.copy(taskListState = TaskListState(true, newListData)))
     }
     
     def requestCleaningData(cleaningJobID:String, offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
       val url = "/ajax/CleaningJobDataRequest"
       val data = upickle.write(CleaningJobDataRequest(deviceFingerprint,cleaningJobID, count, offset))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobDataRespons = upickle.read[CleaningJobDataResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobDataRespons = upickle.read[CleaningJobDataResponse](responseText)
         cleaningJobDataResponse(cleaningJobDataRespons, t)
       })
     }
@@ -280,8 +393,8 @@ object UBOdinCleaningJobPage {
     def requestGetCleaningJobSettings(cleaningJobID:String) : Callback = {
       val url = "/ajax/GetCleaningJobSettingsRequest"
       val data = upickle.write(GetCleaningJobSettingsRequest(deviceFingerprint, cleaningJobID))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobSettingsRespons = upickle.read[GetCleaningJobSettingsResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobSettingsRespons = upickle.read[GetCleaningJobSettingsResponse](responseText)
         getCleaningJobSettingsResponse(cleaningJobSettingsRespons, t )
       })
     }
@@ -302,8 +415,8 @@ object UBOdinCleaningJobPage {
     def requestGetCleaningJobSettingsOptions(cleaningJobID:String) : Callback = {
       val url = "/ajax/GetCleaningJobSettingsOptionsRequest"
       val data = upickle.write(GetCleaningJobSettingsOptionsRequest( cleaningJobID))
-      ajaxRequest(url, data, xhr => {
-        val cleaningJobSettingsOptionsRespons = upickle.read[GetCleaningJobSettingsOptionsResponse](xhr.responseText)
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobSettingsOptionsRespons = upickle.read[GetCleaningJobSettingsOptionsResponse](responseText)
         getCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptionsRespons, t )
       })
     }
@@ -331,8 +444,8 @@ object UBOdinCleaningJobPage {
         init >> {
           val (repairValue, reason) = reasonRepairValue
           val data = upickle.write(CleaningJobRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
-          ajaxRequest(url, data, xhr => {
-            val cleaningJobRepairRespons = upickle.read[NoResponse](xhr.responseText)
+          ajaxRequest(url, data, responseText => {
+            val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
             /*t.modState(s => {
               val drow = s.dataTableState.data.data(s.dataTableViewState.offset + s.dataTableViewState.rows.indexOf(row)).data
               val dcol = repairValues.indexOf(repairValue) + s.latLonColsState.latColIdx
@@ -387,6 +500,7 @@ object UBOdinCleaningJobPage {
     }
     
     def pageChange(offset:Int, tableRows:Vector[ODInTable.Model]) : Callback = {
+      println(s"pageChange: offset: $offset rowCount:${tableRows.length}")
       t.modState(s => s.copy( dataTableViewState = DataTableViewState(offset, tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))))
     }
       
@@ -410,12 +524,14 @@ object UBOdinCleaningJobPage {
     
     val onTableRowSelect: ODInTable.Model => Callback = {
       tableRow => {
+        println(tableRow)
         t.modState(s => {
           val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
           val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
           val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
           val state = "NY"
-          s.copy(selectedTask = Some(s.taskListState.data(s.dataTableViewState.rows.indexOf(tableRow))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
+          val rowIDs = s.dataTableViewState.rows.map(_.prov)
+          s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
         })
       }
     }
@@ -702,7 +818,7 @@ object UBOdinCleaningJobPage {
   
     //boot up and load initial data
     def start : Callback  = {
-      requestLoadCleaningJob(cleaningJobID)
+      createWebSocket( None, Some((cleaningJobID, requestLoadCleaningJob)), Some((cleaningJobID, requestLoadCleaningJob)) )
       //requestGetCleaningJobSettingsOptions(cleaningJobID) >> requestGetCleaningJobSettings(cleaningJobID) >> requestCleaningJobTaskList(cleaningJobID, 10, 0) >> requestCleaningData(cleaningJobID)
     }
       
@@ -722,7 +838,7 @@ object UBOdinCleaningJobPage {
         <.div(Style.info, ^.key := "info")(
           /*<.h3(Style.infoContent)("You Have Been Checked In to Your Job Site"),
           LocalDemoButton(name ="I Am Leaving Job",linkButton =  true,href  = "#/leavingjob?fp="+deviceFingerprint)*/ 
-          if(S.progressState.loading)
+          if(S.progressState.loading > 0)
             MuiLinearProgress( mode = DeterminateIndeterminate.indeterminate)()
           else 
             <.div(^.height := "4px")()
