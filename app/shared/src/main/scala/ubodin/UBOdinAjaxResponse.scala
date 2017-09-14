@@ -8,6 +8,7 @@ object UBOdinAjaxResponse {
       case "NoResponse" => upickle.read[NoResponse](response)
       case "CleaningJobListResponse" => upickle.read[CleaningJobListResponse](response)
       case "CleaningJobDataResponse" => upickle.read[CleaningJobDataResponse](response)
+      case "CleaningJobDataCountResponse" => upickle.read[CleaningJobDataCountResponse](response)
       case "CleaningJobTaskListResponse" => upickle.read[CleaningJobTaskListResponse](response)
       case "UserInfoResponse" => upickle.read[UserInfoResponse](response)
       case "LoginResponse" => upickle.read[LoginResponse](response)
@@ -21,6 +22,7 @@ object UBOdinAjaxResponse {
       case "NoResponse" => upickle.write(response.asInstanceOf[NoResponse])
       case "CleaningJobListResponse" => upickle.write(response.asInstanceOf[CleaningJobListResponse])
       case "CleaningJobDataResponse" => upickle.write(response.asInstanceOf[CleaningJobDataResponse])
+      case "CleaningJobDataCountResponse" => upickle.write(response.asInstanceOf[CleaningJobDataCountResponse])
       case "CleaningJobTaskListResponse" => upickle.write(response.asInstanceOf[CleaningJobTaskListResponse])
       case "UserInfoResponse" => upickle.write(response.asInstanceOf[UserInfoResponse])
       case "LoginResponse" => upickle.write(response.asInstanceOf[LoginResponse])
@@ -39,6 +41,8 @@ case class CleaningJobTaskListResponse(cleaningJobTasks: Vector[CleaningJobTaskG
 
 case class CleaningJobDataResponse(cleaningJobData: Vector[CleaningJobData]) extends UBOdinAjaxResponse("CleaningJobDataResponse")
 
+case class CleaningJobDataCountResponse(cleaningJobDataCount:Int) extends UBOdinAjaxResponse("CleaningJobDataCountResponse")
+
 case class GetCleaningJobSettingsResponse(cleaningJobSettings: Vector[CleaningJobSettingContainer]) extends UBOdinAjaxResponse("GetCleaningJobSettingsResponse")
 
 case class GetCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptions: Vector[SettingOptionContainer]) extends UBOdinAjaxResponse("GetCleaningJobSettingsOptionsResponse")
@@ -47,6 +51,6 @@ case class UserInfoResponse(userInfo: UserInfoData) extends UBOdinAjaxResponse("
 
 case class LoginResponse(userInfo:UserInfoResponse, cleaningJobs:CleaningJobListResponse)  extends UBOdinAjaxResponse("LoginResponse")
 
-case class LoadCleaningJobResponse(job:CleaningJob, options:GetCleaningJobSettingsOptionsResponse, settings:GetCleaningJobSettingsResponse, taskList:CleaningJobTaskListResponse, data:CleaningJobDataResponse) extends UBOdinAjaxResponse("LoadCleaningJobResponse")
+case class LoadCleaningJobResponse(job:CleaningJob, options:GetCleaningJobSettingsOptionsResponse, settings:GetCleaningJobSettingsResponse, taskList:CleaningJobTaskListResponse, data:CleaningJobDataResponse, dataCount:CleaningJobDataCountResponse) extends UBOdinAjaxResponse("LoadCleaningJobResponse")
 
 case class WSResponseWrapper(responseType:String, responseUID:Int, response:String)

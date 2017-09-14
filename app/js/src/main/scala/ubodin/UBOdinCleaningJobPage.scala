@@ -201,6 +201,7 @@ object UBOdinCleaningJobPage {
           // This means that calls like .setState will now return Unit instead of Callback.
           val direct = t.accessDirect
           def defaultHandler(cb:Callback) : String => Callback = str => cb
+          
           // These are message-receiving events from the WebSocket "thread".
           def onmessage(e: MessageEvent): Unit = {
             val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
@@ -309,6 +310,7 @@ object UBOdinCleaningJobPage {
         t.modState(s => s.copy(cleaningJobType = cleaningJobLoadResponse.job.jobType),
         getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >>
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
+        cleaningJobDataCountResponse(cleaningJobLoadResponse.dataCount, t) >>
         cleaningJobDataResponse(cleaningJobLoadResponse.data, t))
       })
     }
@@ -372,6 +374,14 @@ object UBOdinCleaningJobPage {
       //val cols = newTableData.head.unzip._1.toList
       val config = newTableData.cols.map(col => (col, Some(uncertaintyCellHighlight), None, None) ).toList
       t.modState(s => s.copy(dataTableState = DataTableState(true, newTableData, config), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) )) >> afterNextPage(0, newTableData.data.slice(0,5))
+    }
+    
+    def cleaningJobDataCountResponse(cleaningJobDataCountResponse: CleaningJobDataCountResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
+      println("cleaningJobDataCountResponse: " )
+      val totalDataCount = cleaningJobDataCountResponse.cleaningJobDataCount
+      //val config = newTableData.cols.map(col => (col, Some(uncertaintyCellHighlight), None, None) ).toList
+      //t.modState(s => s.copy(dataTableState = DataTableState(true, newTableData, config), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) )) >> afterNextPage(0, newTableData.data.slice(0,5))
+      Callback.info("count" + totalDataCount)
     }
     
     def requestCreateCleaningJobLocationFilter(cleaningJobID:String, cleaningJobDataID:String, name:String, distance:Double, latCol:String, lonCol:String, lat:Double, lon:Double) : Callback = {
@@ -523,8 +533,7 @@ object UBOdinCleaningJobPage {
     }
     
     val onTableRowSelect: ODInTable.Model => Callback = {
-      tableRow => {
-        println(tableRow)
+      tableRow => 
         t.modState(s => {
           val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
           val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
@@ -533,7 +542,6 @@ object UBOdinCleaningJobPage {
           val rowIDs = s.dataTableViewState.rows.map(_.prov)
           s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
         })
-      }
     }
     
     val loadTableData: (ReactMouseEvent, Boolean) => Callback = {
@@ -555,7 +563,15 @@ object UBOdinCleaningJobPage {
        e => Callback.info("muiTaskListTouchEvent")
        
     val muiTaskListTouchTapEvent: CleaningJobTaskGroup => TouchTapEvent => Callback = 
-       reasons => e => t.modState(s => s.copy(selectedRow = Some(s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))), selectedTask = Some(reasons))) >> t.state.flatMap(s => UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog))
+       reasons => e => t.modState(s => {
+           val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
+           val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+           val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" 
+           val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+           val state = "NY"
+           val rowIDs = s.dataTableViewState.rows.map(_.prov)
+           s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
+         }, t.state.flatMap(s => UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog)))
        
     val muiTaskListAnyEvent: scala.scalajs.js.Any => Callback = 
        e => Callback.info("muiTaskListAnyEvent")  

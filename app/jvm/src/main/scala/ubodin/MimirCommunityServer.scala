@@ -90,7 +90,7 @@ class MCCWebSocket extends WebSocketAdapter
 
     override def  onWebSocketConnect( session:Session) : Unit = {
         super.onWebSocketConnect(session);
-        println("WebSocket Connect: " + session);
+        println(s"WebSocket Connect: remote:${session.getRemoteAddress} protocol: ${session.getProtocolVersion} ");
     }
 
     override def onWebSocketError( cause:Throwable) : Unit = {
@@ -176,7 +176,8 @@ object SharedServlet {
         val tasks = CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobTasks))
         val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, None, None)
         val data = CleaningJobDataResponse(cleaningJobData)
-        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, data))
+        val dataCount = CleaningJobDataCountResponse(getCleaningJobDataCount(deviceID, cleaningJobID))
+        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, data, dataCount))
       }
       case UserInfoRequest(deviceID) => {
         (UserInfoResponse(getUserInfo(deviceID).head))
@@ -321,22 +322,32 @@ object SharedServlet {
    }
   
   def getCleaningJobData(deviceID:String, cleaningJobID:String, count:Option[Int], offset:Option[Int]) : Vector[CleaningJobData] = {
-    val limitOffset = offset match {
-      case Some(offsetIdx) => s" OFFSET $offsetIdx"
-      case None => ""
-    }
-    val limit = count match {
-      case Some(limitCount) => s" LIMIT $limitCount$limitOffset"
-      case None => ""
-    }
     val cleaningJobData = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
-            val queryRes = MimirCommunityServer.queryMimir(assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID")))
-            CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), queryRes._1, queryRes._2)
+             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+             val oper = count match {
+               case Some(limit) => MimirVizier.parseQuery(query).limit(limit, offset.getOrElse(0))
+               case None => MimirVizier.parseQuery(query)
+             }
+             val queryRes = MimirCommunityServer.queryMimir(oper)
+             CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), queryRes._1, queryRes._2)
           }).list.apply()
         }
         cleaningJobData.toVector
+  }
+  
+  def getCleaningJobDataCount(deviceID:String, cleaningJobID:String) : Int = {
+    val cleaningJobDataCount = NamedDB("mimir_community_server") autoCommit { implicit session =>
+         sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
+           .map(rs => {
+             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+             val oper = mimir.algebra.Project(Seq(mimir.algebra.ProjectArg("COUNT", mimir.algebra.Function("COUNT", Seq()))), MimirVizier.parseQuery(query))
+             val queryRes = MimirCommunityServer.queryMimir(oper)
+             queryRes._2.head.data.head.data.toInt
+          }).single.apply()
+        }
+        cleaningJobDataCount.get
   }
   
   def assembleCleaningJobDataQuery(deviceID:String, cleaningJobDataID:Int) : String = {
@@ -607,6 +618,18 @@ object MimirCommunityServer {
     }
   }
   
+  def explainEverything(oper:mimir.algebra.Operator): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainEverything(oper))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
   def explainSubset(query:String, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
     val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
       def run() = {
@@ -645,9 +668,13 @@ object MimirCommunityServer {
   }
   
   def queryMimir(query:String): (Vector[String], Vector[CleaningJobDataRow]) = {
+    val oper = MimirVizier.parseQuery(query)
+    queryMimir(oper)   
+  }
+  
+  def queryMimir(oper:mimir.algebra.Operator): (Vector[String], Vector[CleaningJobDataRow]) = {
     val queryResults = mimirThread.runOnThread[(Vector[String], Vector[CleaningJobDataRow])](new MimirRunnable[(Vector[String], Vector[CleaningJobDataRow])](){
       def run() = {
-        val oper = MimirVizier.parseQuery(query)
         val results = new java.util.Vector[Row]()
          var cols : Seq[String] = null
          var colsIndexes : Seq[Int] = null
