@@ -102,7 +102,8 @@ object ODInTable {
   case class State(
     filterText: String,
     offset: Int,
-    rowsPerPage: Int,
+    totalRows: Int,
+    pageRows: Int,
     filteredModels: Vector[Model],
     sortedState: Map[String, String]
   )
@@ -110,13 +111,13 @@ object ODInTable {
   class Backend(t: BackendScope[Props, State]) {
 
     def onTextChange(P: Props)(value: String): Callback =
-      t.modState(_.copy(filteredModels = getFilteredModels(value, P.data), offset = 0))
+      t.modState(_.copy(filteredModels = getFilteredModels(value, P.data)))
 
     def onPreviousClick(P: Props): Callback =
-      t.modState(s => s.copy(offset = s.offset - s.rowsPerPage), t.state.flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset , s.offset + s.rowsPerPage )))) //>>  t.state.map(s => s).flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset, s.offset - s.rowsPerPage) )  )  
+      t.modState(s => s.copy(offset = s.offset - s.pageRows), t.state.flatMap( s => P.afterPrevPage(s.offset , s.pageRows))) //>>  t.state.map(s => s).flatMap( s => P.afterPrevPage(s.offset , s.filteredModels.slice(s.offset, s.offset - s.rowsPerPage) )  )  
 
     def onNextClick(P: Props): Callback =
-      t.modState(s => s.copy(offset = s.offset + s.rowsPerPage), t.state.flatMap( s => P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + s.rowsPerPage)))) //>>  t.state.flatMap( s => P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + s.rowsPerPage) )  )
+      t.modState(s => s.copy(offset = s.offset + s.pageRows), t.state.flatMap( s => P.afterNextPage(s.offset , s.pageRows))) //>>  t.state.flatMap( s => P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + s.rowsPerPage) )  )
 
     def getFilteredModels(text: String, models: Vector[Model]): Vector[Model] =
       if (text.isEmpty) models
@@ -133,12 +134,10 @@ object ODInTable {
       }
 
     def onPageSizeChange(P: Props)(value: String): Callback = 
-      t.modState(s => s.copy(rowsPerPage = value.toInt))  >> t.state.flatMap( s => {
-        if(value.toInt != s.rowsPerPage)
-          P.afterNextPage(s.offset , s.filteredModels.slice(s.offset, s.offset + value.toInt) ) 
-        else
-          Callback.info("number of rows did not actually change; no need to update listeners")
-      })
+      t.modState(s => {
+        println(s"onPageSizeChange: offset: ${s.offset} newValue: ${value.toInt}")
+        s.copy(offset = s.offset-value.toInt, pageRows = value.toInt)
+      }, onNextClick(P) )
 
     def render(P: Props, S: State) =
       <.div(
@@ -149,9 +148,10 @@ object ODInTable {
         settingsBar((P, this, S)),
         tableC((P, S, this)),
         Pager(
-          S.rowsPerPage,
           S.filteredModels.length,
-          S.offset,
+          S.totalRows,
+          {println(s"Pager: offset: ${S.offset}") 
+            S.offset},
           onNextClick(P),
           onPreviousClick(P)
         )
@@ -264,7 +264,6 @@ object ODInTable {
     .render{$ =>
       val (props, state, b) = $.props
       val rows = state.filteredModels
-        .slice(state.offset, state.offset + state.rowsPerPage)
         .zipWithIndex.map {
           case (row, i) => tableRow.withKey(i)((row, props))
         }
@@ -279,13 +278,13 @@ object ODInTable {
       val (p, b, s) = $.props
       var value = ""
       var options: List[String] = Nil
-      val total = s.filteredModels.length
-      if (total > p.rowsPerPage) {
-        value = s.rowsPerPage.toString
-        options = immutable.Range.inclusive(p.rowsPerPage, total, 10 * (total / 100 + 1)).:+(total).toList.map(_.toString)
+      val rowsPerPage = s.filteredModels.length
+      if (p.totalRows > rowsPerPage) {
+        value = rowsPerPage.toString()
+        options = immutable.Range.inclusive(rowsPerPage, p.totalRows, 10 * (p.totalRows / 100 + 1)).:+(p.totalRows).toList.map(_.toString)
       }
       <.div(p.style.settingsBar)(
-        <.div(<.strong("Total: " + s.filteredModels.size)),
+        <.div(<.strong("Total: " + p.totalRows )),
         DefaultSelect(label = "Page Size: ",
           options = options,
           value = value,
@@ -294,7 +293,7 @@ object ODInTable {
     }.build
 
   val component = ReactComponentB[Props]("ODInTable")
-    .initialState_P(p => State(filterText = "", offset = 0, p.rowsPerPage, p.data, Map()))
+    .initialState_P(p => State(filterText = "", offset = 0, p.totalRows, p.data.length, p.data, Map()))
     .renderBackend[Backend]
     .componentWillReceiveProps(e => Callback.ifTrue(e.$.props.data != e.nextProps.data, e.$.backend.onTextChange(e.nextProps)(e.$.state.filterText)))
     .build
@@ -302,15 +301,15 @@ object ODInTable {
   case class Props(data: Vector[Model],
                    columns: List[String],
                    config: List[Config],
-                   afterNextPage: (Int, Vector[Model]) => Callback,
-                   afterPrevPage: (Int, Vector[Model]) => Callback,
+                   totalRows: Int,
+                   afterNextPage: (Int, Int) => Callback,
+                   afterPrevPage: (Int, Int) => Callback,
                    onRowSelect: Option[(Model) => Callback],
                    rowStyler:Option[Model => Option[String]],
-                   rowsPerPage: Int,
                    style: Style,
                    enableSearch: Boolean,
                    searchBoxStyle: ReactSearchBox.Style)
 
-  def apply(data: Vector[Model], columns: List[String], config: List[Config] = List(), afterNextPage:(Int, Vector[Model]) => Callback = (offset, rows) => Callback.info("ODOnTable: no after next page"), afterPrevPage:(Int, Vector[Model]) => Callback = (offset, rows) => Callback.info("ODOnTable: no after prev page"), onRowSelect: Option[(Model) => Callback] = None, rowStyler:Option[Model => Option[String]] = None, rowsPerPage: Int = 5, style: Style = DefaultStyle,enableSearch: Boolean = true,searchBoxStyle :ReactSearchBox.Style = ReactSearchBox.DefaultStyle) =
-    component(Props(data, columns, config, afterNextPage, afterPrevPage, onRowSelect, rowStyler, rowsPerPage, style,enableSearch,searchBoxStyle))
+  def apply(data: Vector[Model], columns: List[String], totalRows: Int, config: List[Config] = List(), afterNextPage:(Int, Int) => Callback = (offset, rows) => Callback.info("ODOnTable: no after next page"), afterPrevPage:(Int, Int) => Callback = (offset, rows) => Callback.info("ODOnTable: no after prev page"), onRowSelect: Option[(Model) => Callback] = None, rowStyler:Option[Model => Option[String]] = None, style: Style = DefaultStyle,enableSearch: Boolean = true,searchBoxStyle :ReactSearchBox.Style = ReactSearchBox.DefaultStyle) =
+    component(Props(data, columns, config, totalRows, afterNextPage, afterPrevPage, onRowSelect, rowStyler, style,enableSearch,searchBoxStyle))
 }

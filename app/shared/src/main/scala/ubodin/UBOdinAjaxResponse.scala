@@ -7,9 +7,11 @@ object UBOdinAjaxResponse {
     responseID match {
       case "NoResponse" => upickle.read[NoResponse](response)
       case "CleaningJobListResponse" => upickle.read[CleaningJobListResponse](response)
-      case "CleaningJobDataResponse" => upickle.read[CleaningJobDataResponse](response)
       case "CleaningJobDataCountResponse" => upickle.read[CleaningJobDataCountResponse](response)
+      case "CleaningJobDataResponse" => upickle.read[CleaningJobDataResponse](response)
+      case "CleaningJobDataAndCountResponse" => upickle.read[CleaningJobDataAndCountResponse](response)
       case "CleaningJobTaskListResponse" => upickle.read[CleaningJobTaskListResponse](response)
+      case "CleaningJobsModerationResponse" => upickle.read[CleaningJobsModerationResponse](response)
       case "UserInfoResponse" => upickle.read[UserInfoResponse](response)
       case "LoginResponse" => upickle.read[LoginResponse](response)
       case "GetCleaningJobSettingsResponse" => upickle.read[GetCleaningJobSettingsResponse](response)
@@ -21,9 +23,11 @@ object UBOdinAjaxResponse {
     response.responseID match {
       case "NoResponse" => upickle.write(response.asInstanceOf[NoResponse])
       case "CleaningJobListResponse" => upickle.write(response.asInstanceOf[CleaningJobListResponse])
-      case "CleaningJobDataResponse" => upickle.write(response.asInstanceOf[CleaningJobDataResponse])
       case "CleaningJobDataCountResponse" => upickle.write(response.asInstanceOf[CleaningJobDataCountResponse])
+      case "CleaningJobDataResponse" => upickle.write(response.asInstanceOf[CleaningJobDataResponse])
+      case "CleaningJobDataAndCountResponse" => upickle.write(response.asInstanceOf[CleaningJobDataAndCountResponse])
       case "CleaningJobTaskListResponse" => upickle.write(response.asInstanceOf[CleaningJobTaskListResponse])
+      case "CleaningJobsModerationResponse" => upickle.write(response.asInstanceOf[CleaningJobsModerationResponse])
       case "UserInfoResponse" => upickle.write(response.asInstanceOf[UserInfoResponse])
       case "LoginResponse" => upickle.write(response.asInstanceOf[LoginResponse])
       case "GetCleaningJobSettingsResponse" => upickle.write(response.asInstanceOf[GetCleaningJobSettingsResponse])
@@ -39,9 +43,13 @@ case class CleaningJobListResponse(cleaningJobs: Vector[CleaningJob]) extends UB
 
 case class CleaningJobTaskListResponse(cleaningJobTasks: Vector[CleaningJobTaskGroup]) extends UBOdinAjaxResponse("CleaningJobTaskListResponse")
 
-case class CleaningJobDataResponse(cleaningJobData: Vector[CleaningJobData]) extends UBOdinAjaxResponse("CleaningJobDataResponse")
+case class CleaningJobsModerationResponse(cleaningJobsTasks: List[(String,Vector[CleaningJobTaskGroup])]) extends UBOdinAjaxResponse("CleaningJobsModerationResponse")
+
+case class CleaningJobDataResponse(cleaningJobData: Vector[CleaningJobData], count:Int, offset:Int) extends UBOdinAjaxResponse("CleaningJobDataResponse")
 
 case class CleaningJobDataCountResponse(cleaningJobDataCount:Int) extends UBOdinAjaxResponse("CleaningJobDataCountResponse")
+
+case class CleaningJobDataAndCountResponse(cleaningJobData:CleaningJobDataResponse, cleaningJobDataCount:CleaningJobDataCountResponse) extends UBOdinAjaxResponse("CleaningJobDataAndCountResponse")
 
 case class GetCleaningJobSettingsResponse(cleaningJobSettings: Vector[CleaningJobSettingContainer]) extends UBOdinAjaxResponse("GetCleaningJobSettingsResponse")
 

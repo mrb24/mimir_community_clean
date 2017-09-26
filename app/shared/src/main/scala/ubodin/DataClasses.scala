@@ -42,6 +42,7 @@ object CleaningJobTaskRepair {
     repairType match {
       case "RepairByType" => upickle.read[CleaningJobTaskRepairByType](repairJson)
       case "RepairFromList" => upickle.read[CleaningJobTaskRepairFromList](repairJson)
+      case "ModerationRepair" => upickle.read[CleaningJobTaskModerationRepair](repairJson)
       
     }
   }
@@ -49,6 +50,7 @@ object CleaningJobTaskRepair {
     repair match {
       case repairByType@CleaningJobTaskRepairByType(_,_) => upickle.write(repairByType)
       case repairFromList@CleaningJobTaskRepairFromList(_,_) => upickle.write(repairFromList)
+      case moderationRepair@CleaningJobTaskModerationRepair(_) => upickle.write(moderationRepair)
       
     }
   }
@@ -71,10 +73,14 @@ case class CleaningJobTaskRepairFromListValues(
   choice: String,
   weight: Double
 )
+
 case class CleaningJobTaskRepairFromList(
   selector: String,
   values: List[CleaningJobTaskRepairFromListValues]
 ) extends CleaningJobTaskRepair("RepairFromList")
+
+case class CleaningJobTaskModerationRepair( value: String ) 
+  extends CleaningJobTaskRepair("ModerationRepair")
 
 case class CleaningJobTask(
   source: String,

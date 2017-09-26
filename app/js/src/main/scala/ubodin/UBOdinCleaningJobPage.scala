@@ -107,7 +107,7 @@ object UBOdinCleaningJobPage {
                    snackState:SnackState = SnackState(false,"",""),
                    taskTreeState:TaskTreeState = TaskTreeState(false, None),
                    taskListState:TaskListState = TaskListState(false, List()),
-                   dataTableState:DataTableState = DataTableState(false, CleaningJobData(0,0,Vector(),Vector()), List()),//List(), Vector(), List()),
+                   dataTableState:DataTableState = DataTableState(false, CleaningJobData(0,0,Vector(),Vector()), List(), 0, 5),//List(), Vector(), List()),
                    dataTableViewState:DataTableViewState = DataTableViewState(0,Vector()),
                    repairValues:Seq[String] = Seq(),
                    selectedRow:Option[CleaningJobDataRow] = None,
@@ -138,7 +138,7 @@ object UBOdinCleaningJobPage {
   case class SnackState(open:Boolean, title:String, message:String)
   case class TaskTreeState(loaded:Boolean, data:Option[TreeItem])
   case class TaskListState(loaded:Boolean, data:List[CleaningJobTaskGroup])
-  case class DataTableState(loaded:Boolean, data:CleaningJobData, config:List[Config])//columns: List[String], data:Vector[Map[String, Any]], config:List[Config]
+  case class DataTableState(loaded:Boolean, data:CleaningJobData, config:List[Config], totalRecords:Int, perPageRecords:Int)//columns: List[String], data:Vector[Map[String, Any]], config:List[Config]
   case class DataTableViewState(offset:Int, rows:Vector[ODInTable.Model])
   case class DrawerState(choices:Seq[MainMenuChoice], selected:Seq[String], selectedWaitingCallback:Option[MainMenuChoice] = None, open:Boolean, docked:Boolean, right:Boolean)
   case class MapState(center:LatLng, markers: List[Marker], zoom:Int, cluster:Boolean)  
@@ -206,22 +206,9 @@ object UBOdinCleaningJobPage {
           def onmessage(e: MessageEvent): Unit = {
             val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
             direct.modState(_.copy().wslog(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType} Size: ${respWrapped.response.length()}"),
-            (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, {
-              val resp = UBOdinAjaxResponse.readResponse(respWrapped.responseType, respWrapped.response)
-              resp match {
-                case response:NoResponse => defaultHandler( Callback.info("WS NoResponse"))
-                case response:CleaningJobTaskListResponse => defaultHandler(cleaningJobTaskListResponse(response, t))
-                case response:CleaningJobDataResponse => defaultHandler(cleaningJobDataResponse(response, t))
-                case response:GetCleaningJobSettingsResponse => defaultHandler(getCleaningJobSettingsResponse(response, t))
-                case response:GetCleaningJobSettingsOptionsResponse => defaultHandler(getCleaningJobSettingsOptionsResponse(response, t))
-                case response:LoadCleaningJobResponse => defaultHandler( 
-                  t.modState(s => s.copy(cleaningJobType = response.job.jobType),
-                  getCleaningJobSettingsOptionsResponse(response.options, t ) >>
-                  getCleaningJobSettingsResponse(response.settings, t ) >>
-                  cleaningJobDataResponse(response.data, t)))
-                case x => defaultHandler( Callback.warn("WS Response Not Handled: " + x.toString()) )
-              }
-            })(respWrapped.response)) >> t.modState(s=>s.copy(progressState = ProgressState(s.progressState.loading -1), webSocketState = s.webSocketState.copy(handlers = (s.webSocketState.handlers -= respWrapped.responseUID)))))
+            (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, 
+                defaultHandler( Callback.warn("WS Response Not Handled: " + respWrapped.responseType) )
+              )(respWrapped.response)) >> t.modState(s=>s.copy(progressState = ProgressState(s.progressState.loading -1), webSocketState = s.webSocketState.copy(handlers = (s.webSocketState.handlers -= respWrapped.responseUID)))))
           }
     
           def onerror(e: ErrorEvent): Unit = {
@@ -278,7 +265,9 @@ object UBOdinCleaningJobPage {
     def ajaxRequest(url:String, data:String, cb:String => Callback ): Callback = {
       t.state.flatMap( s => {
         s.webSocketState.ws match {
+          //if web socket available, then use that instead
           case Some(webSoc) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
+          //otherwise, use a stinky old ajax request
           case None => ajaxRequesta(url, data, cb)
         }
       })
@@ -337,7 +326,6 @@ object UBOdinCleaningJobPage {
     
 
     def cleaningJobTaskTreeResponse(cleaningJobTaskListResponse: CleaningJobTaskListResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      //val curQuizItem = scope.state.currentQuizItem
       println("cleaningJobTaskTreeResponse: " )
       val newTreeData = cleaningJobTaskListResponse.cleaningJobTasks.map(cleaningJobTask => {
         TreeItem(toElement(cleaningJobTask))
@@ -347,7 +335,6 @@ object UBOdinCleaningJobPage {
     }
     
     def cleaningJobTaskListResponse(cleaningJobTaskListResponse: CleaningJobTaskListResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      //val curQuizItem = scope.state.currentQuizItem
       println("cleaningJobTaskListResponse: " )
       val newListData = cleaningJobTaskListResponse.cleaningJobTasks.toList
       t.modState(s => s.copy(taskListState = TaskListState(true, newListData)))
@@ -363,32 +350,41 @@ object UBOdinCleaningJobPage {
     }
     
     def cleaningJobDataResponse(cleaningJobDataResponse: CleaningJobDataResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      //val curQuizItem = scope.state.currentQuizItem
       println("cleaningJobDataResponse: " )
-      /*val newTableData = cleaningJobDataResponse.cleaningJobData.map(cleaningJobData => {
-        cleaningJobData.data.map(data => {
-          cleaningJobData.cols.zip(data.data).toMap
-        })  
-      }).head*/
       val newTableData = cleaningJobDataResponse.cleaningJobData.head
-      //val cols = newTableData.head.unzip._1.toList
       val config = newTableData.cols.map(col => (col, Some(uncertaintyCellHighlight), None, None) ).toList
-      t.modState(s => s.copy(dataTableState = DataTableState(true, newTableData, config), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) )) >> afterNextPage(0, newTableData.data.slice(0,5))
+      t.modState(s => s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) ),  pageChange(cleaningJobDataResponse.offset, newTableData.data)) 
+    }
+    
+    def requestCleaningDataAndCount(cleaningJobID:String, offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
+      val url = "/ajax/CleaningJobDataAndCountRequest"
+      val data = upickle.write(CleaningJobDataAndCountRequest(deviceFingerprint,cleaningJobID, count, offset))
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobDataAndCountRespons = upickle.read[CleaningJobDataAndCountResponse](responseText)
+        cleaningJobDataCountResponse(cleaningJobDataAndCountRespons.cleaningJobDataCount, t) >>
+        cleaningJobDataResponse(cleaningJobDataAndCountRespons.cleaningJobData, t)
+      })
+    }
+    
+    def requestCleaningDataCount(cleaningJobID:String) : Callback = {
+      val url = "/ajax/CleaningJobDataCountRequest"
+      val data = upickle.write(CleaningJobDataCountRequest(deviceFingerprint,cleaningJobID))
+      ajaxRequest(url, data, responseText => {
+        val cleaningJobDataCountResponses = upickle.read[CleaningJobDataCountResponse](responseText)
+        cleaningJobDataCountResponse(cleaningJobDataCountResponses, t)
+      })
     }
     
     def cleaningJobDataCountResponse(cleaningJobDataCountResponse: CleaningJobDataCountResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      println("cleaningJobDataCountResponse: " )
-      val totalDataCount = cleaningJobDataCountResponse.cleaningJobDataCount
-      //val config = newTableData.cols.map(col => (col, Some(uncertaintyCellHighlight), None, None) ).toList
-      //t.modState(s => s.copy(dataTableState = DataTableState(true, newTableData, config), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) )) >> afterNextPage(0, newTableData.data.slice(0,5))
-      Callback.info("count" + totalDataCount)
+      println(s"cleaningJobDataCountResponse: count: ${cleaningJobDataCountResponse.cleaningJobDataCount}" )
+      t.modState(s => s.copy(dataTableState = s.dataTableState.copy(totalRecords = cleaningJobDataCountResponse.cleaningJobDataCount)))
     }
     
     def requestCreateCleaningJobLocationFilter(cleaningJobID:String, cleaningJobDataID:String, name:String, distance:Double, latCol:String, lonCol:String, lat:Double, lon:Double) : Callback = {
       val url = "/ajax/CreateCleaningJobLocationFilterSettingRequest"
       val data = upickle.write(CreateCleaningJobLocationFilterSettingRequest(deviceFingerprint, cleaningJobDataID, name, distance, latCol, lonCol, lat, lon))
       ajaxRequest(url, data, xhr => {
-        t.modState(s => s.copy( drawerState = s.drawerState.copy(selected = s.drawerState.selected.union(Seq(name)).distinct))) >> requestCleaningData(cleaningJobID )
+        t.modState(s => s.copy( drawerState = s.drawerState.copy(selected = s.drawerState.selected.union(Seq(name)).distinct))) >> t.state.flatMap(s => requestCleaningDataAndCount(cleaningJobID, Some(0), Some(s.dataTableViewState.rows.length)) )
       })
     }
     
@@ -396,7 +392,7 @@ object UBOdinCleaningJobPage {
       val url = "/ajax/RemoveCleaningJobLocationFilterSettingRequest"
       val data = upickle.write(RemoveCleaningJobLocationFilterSettingRequest(deviceFingerprint, cleaningJobDataID, name))
       ajaxRequest(url, data, xhr => {
-        t.modState(s => s.copy( drawerState = s.drawerState.copy( selected = s.drawerState.selected.filter(!_.equals(name))))) >> requestCleaningData(cleaningJobID )
+        t.modState(s => s.copy( drawerState = s.drawerState.copy( selected = s.drawerState.selected.filter(!_.equals(name))))) >> t.state.flatMap(s => requestCleaningDataAndCount(cleaningJobID, Some(0), Some(s.dataTableViewState.rows.length)) )
       })
     }
     
@@ -410,7 +406,6 @@ object UBOdinCleaningJobPage {
     }
     
     def getCleaningJobSettingsResponse(cleaningJobSettingsResponse: GetCleaningJobSettingsResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      //val curQuizItem = scope.state.currentQuizItem
       println("getCleaningJobSettingsResponse: " )
       cleaningJobSettingsResponse.cleaningJobSettings.map( containedCleaningJobSetting => {
         val cleaningJobSetting = CleaningJobSetting.decontainSetting(containedCleaningJobSetting)
@@ -432,7 +427,6 @@ object UBOdinCleaningJobPage {
     }
     
     def getCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptionsResponse: GetCleaningJobSettingsOptionsResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
-      //val curQuizItem = scope.state.currentQuizItem
       println("getCleaningJobSettingsOptionsResponse: " )
       cleaningJobSettingsOptionsResponse.cleaningJobSettingsOptions.map( containedCleaningJobSettingsOption => {
         val settingOption = SettingOption.decontainOption(containedCleaningJobSettingsOption)
@@ -456,14 +450,7 @@ object UBOdinCleaningJobPage {
           val data = upickle.write(CleaningJobRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
           ajaxRequest(url, data, responseText => {
             val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
-            /*t.modState(s => {
-              val drow = s.dataTableState.data.data(s.dataTableViewState.offset + s.dataTableViewState.rows.indexOf(row)).data
-              val dcol = repairValues.indexOf(repairValue) + s.latLonColsState.latColIdx
-              drow(dcol).isDet = true
-              drow(dcol).data = repairValue
-              s.copy()
-            })*/
-            requestCleaningData(cleaningJobID)
+            t.state.flatMap(s => requestCleaningData(cleaningJobID, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
           })
         }
       })
@@ -511,25 +498,27 @@ object UBOdinCleaningJobPage {
     
     def pageChange(offset:Int, tableRows:Vector[ODInTable.Model]) : Callback = {
       println(s"pageChange: offset: $offset rowCount:${tableRows.length}")
-      t.modState(s => s.copy( dataTableViewState = DataTableViewState(offset, tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))))
+      t.modState(s => s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))), 
+          requestCleaningJobTaskFocusedList(cleaningJobID, tableRows.flatMap(row => { 
+            row match {
+              case CleaningJobDataRow(_, _, prov) => Some(prov)
+              case _ => None
+            }
+      })))
     }
       
-    val afterNextPage: (Int, Vector[ODInTable.Model]) => Callback = {
-      (offset, tableRows) => pageChange(offset, tableRows) >> requestCleaningJobTaskFocusedList(cleaningJobID, tableRows.flatMap(row => { 
-        row match {
-          case CleaningJobDataRow(_, _, prov) => Some(prov)
-          case _ => None
-        }
-      }))
+    val afterNextPage: (Int, Int) => Callback = {
+      (offset, rows) => {
+        println(s"nextPage: offset: $offset count: $rows")
+        requestCleaningData(cleaningJobID, Some(offset), Some(rows))
+      }
     }
     
-    val afterPrevPage: (Int, Vector[ODInTable.Model]) => Callback = {
-      (offset, tableRows) => pageChange(offset, tableRows) >> requestCleaningJobTaskFocusedList(cleaningJobID, tableRows.flatMap(row => { 
-        row match {
-          case CleaningJobDataRow(_, _, prov) => Some(prov)
-          case _ => None
-        }
-      }))
+    val afterPrevPage: (Int, Int) => Callback = {
+      (offset, rows) => {
+        println(s"prevPage: offset: $offset count: $rows")
+        requestCleaningData(cleaningJobID, Some(offset), Some(rows))
+      }
     }
     
     val onTableRowSelect: ODInTable.Model => Callback = {
@@ -545,7 +534,7 @@ object UBOdinCleaningJobPage {
     }
     
     val loadTableData: (ReactMouseEvent, Boolean) => Callback = {
-      (event, toggled) => requestCleaningData(cleaningJobID)
+      (event, toggled) => t.state.flatMap(s => requestCleaningData(cleaningJobID, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
     }
 
     ///----------------------------------------
@@ -935,7 +924,7 @@ object UBOdinCleaningJobPage {
                   ),   
                   <.div(Style.cleaningTableSection)(
                       if(S.dataTableState.loaded)
-                        ODInTable(data = S.dataTableState.data.data, columns = S.dataTableState.data.cols.toList, config = S.dataTableState.config, afterNextPage, afterPrevPage, Some(onTableRowSelect), Some(uncertaintyRowHighlight))
+                        ODInTable(data = S.dataTableState.data.data, columns = S.dataTableState.data.cols.toList, totalRows = S.dataTableState.totalRecords, config = S.dataTableState.config, afterNextPage, afterPrevPage, Some(onTableRowSelect), Some(uncertaintyRowHighlight))
                       else
                         <.h4("loading...")  
                     )
@@ -945,7 +934,7 @@ object UBOdinCleaningJobPage {
               <.div(Style.cleaningSection)(
                   <.div(Style.cleaningTableSection)(
                     if(S.dataTableState.loaded)
-                      ODInTable(data = S.dataTableState.data.data, columns = S.dataTableState.data.cols.toList, config = S.dataTableState.config, afterNextPage, afterPrevPage, Some(onTableRowSelect), Some(uncertaintyRowHighlight))
+                      ODInTable(data = S.dataTableState.data.data, columns = S.dataTableState.data.cols.toList, totalRows = S.dataTableState.totalRecords, config = S.dataTableState.config, afterNextPage, afterPrevPage, Some(onTableRowSelect), Some(uncertaintyRowHighlight))
                     else
                       <.h4("loading...")  
                   )

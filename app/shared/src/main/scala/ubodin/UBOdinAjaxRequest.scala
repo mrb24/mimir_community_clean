@@ -12,6 +12,8 @@ object UBOdinAjaxRequest {
       case "CleaningJobTaskListRequest" => upickle.read[CleaningJobTaskListRequest](request)
       case "CleaningJobTaskFocusedListRequest" => upickle.read[CleaningJobTaskFocusedListRequest](request)
       case "CleaningJobDataRequest" => upickle.read[CleaningJobDataRequest](request)
+      case "CleaningJobDataCountRequest" => upickle.read[CleaningJobDataCountRequest](request)
+      case "CleaningJobDataAndCountRequest" => upickle.read[CleaningJobDataAndCountRequest](request)
       case "UserInfoRequest" => upickle.read[UserInfoRequest](request)
       case "LoginRequest" => upickle.read[LoginRequest](request)
       case "CleaningJobTaskAcknowledgeRequest" => upickle.read[CleaningJobTaskAcknowledgeRequest](request)
@@ -21,7 +23,9 @@ object UBOdinAjaxRequest {
       case "GetCleaningJobSettingsRequest" => upickle.read[GetCleaningJobSettingsRequest](request)
       case "GetCleaningJobSettingsOptionsRequest" => upickle.read[GetCleaningJobSettingsOptionsRequest](request)
       case "LoadCleaningJobRequest" => upickle.read[LoadCleaningJobRequest](request)
+      case "LoadCleaningJobsModerationRequest" => upickle.read[LoadCleaningJobsModerationRequest](request)
       case "CleaningJobRepairRequest" => upickle.read[CleaningJobRepairRequest](request)
+      case "CleaningJobModRepairRequest" => upickle.read[CleaningJobModRepairRequest](request)
       case "SetDeviceLocationRequest" => upickle.read[SetDeviceLocationRequest](request)
     }
   }
@@ -37,6 +41,10 @@ case class CleaningJobTaskListRequest(deviceID: String, cleaningJobID: String, c
 case class CleaningJobTaskFocusedListRequest(deviceID: String, cleaningJobID: String, rowIDs:Seq[String], cols:Seq[String]) extends UBOdinAjaxRequest("CleaningJobTaskFocusedListRequest") 
 
 case class CleaningJobDataRequest(deviceID: String, cleaningJobID: String, count: Option[Int], offset:Option[Int]) extends UBOdinAjaxRequest("CleaningJobDataRequest")
+
+case class CleaningJobDataCountRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("CleaningJobDataCountRequest")
+
+case class CleaningJobDataAndCountRequest(deviceID: String, cleaningJobID: String, count: Option[Int], offset:Option[Int]) extends UBOdinAjaxRequest("CleaningJobDataAndCountRequest")
 
 case class UserInfoRequest(deviceID: String) extends UBOdinAjaxRequest("UserInfoRequest")
 
@@ -56,9 +64,13 @@ case class GetCleaningJobSettingsOptionsRequest(cleaningJobID: String) extends U
 
 case class LoadCleaningJobRequest(deviceID:String, cleaningJobID: String) extends UBOdinAjaxRequest("LoadCleaningJobRequest") 
 
+case class LoadCleaningJobsModerationRequest(deviceID:String) extends UBOdinAjaxRequest("LoadCleaningJobsModerationRequest") 
+
 case class SetDeviceLocationRequest(deviceID:String, lat:Double, lon:Double) extends UBOdinAjaxRequest("SetDeviceLocationRequest") 
 
 case class CleaningJobRepairRequest(deviceID:String, cleaningJobID:String, model:String, idx:Int, args:Seq[String], repairValue:String) extends UBOdinAjaxRequest("CleaningJobRepairRequest") 
+
+case class CleaningJobModRepairRequest(deviceID:String, cleaningJobID:String, model:String, idx:Int, args:Seq[String], repairValue:String) extends UBOdinAjaxRequest("CleaningJobModRepairRequest") 
 
 case class AjaxRequestWrapper(deviceID:String, requestType:String, request:String)
 case class WSRequestWrapper(deviceID:String, requestType:String, requestUID:Int, request:String)

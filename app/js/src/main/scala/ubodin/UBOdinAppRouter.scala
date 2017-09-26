@@ -13,7 +13,9 @@ object UBOdinAppRouter {
   trait Page
   
   case object Home extends Page
+  case object ModerationPage extends Page
   case class CleaningJobPage(cleaningJobID:Int) extends Page
+  
 
   
   val config = RouterConfigDsl[Page].buildConfig { dsl =>
@@ -21,6 +23,7 @@ object UBOdinAppRouter {
     
    (trimSlashes
       | staticRoute(root, Home) ~> renderR(ctrl => UBOdinHomePage(ctrl))
+      | staticRoute("mod", ModerationPage) ~> renderR(ctrl => UBOdinModerationPage(ctrl))
       | dynamicRouteCT("job" ~ ("/" ~ int ).caseClass[CleaningJobPage]) ~> dynRenderR((page, ctrl) => UBOdinCleaningJobPage(page, ctrl))
       ).notFound(redirectToPage(Home)(Redirect.Replace))
       .renderWith(layout)
