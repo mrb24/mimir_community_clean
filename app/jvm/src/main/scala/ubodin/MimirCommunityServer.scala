@@ -302,14 +302,21 @@ object SharedServlet {
           .list                  // single, list, traversable
           .apply() 
          }).isEmpty){
-         NamedDB("mimir_community_server") autoCommit  { implicit session =>
-           sql"INSERT INTO DEVICES ( DEVICE_UID) VALUES( ${deviceID})" // don't worry, prevents SQL injection
-            .execute                
-            .apply() 
+           val deviceDBID = NamedDB("mimir_community_server") autoCommit  { implicit session =>
+             sql"INSERT INTO DEVICES ( DEVICE_UID) VALUES( ${deviceID})" // don't worry, prevents SQL injection
+              .updateAndReturnGeneratedKey 
+              .apply() 
+           }
+           NamedDB("mimir_community_server") autoCommit  { implicit session =>
+             sql"INSERT INTO USER_DEVICES ( USER_ID, DEVICE_ID ) VALUES (2, ${deviceDBID})" // don't worry, prevents SQL injection
+              .execute() 
+              .apply() 
            }
        }
+       getUserInfo(deviceID)
      }
-     usersData
+     else
+       usersData
   }
   
   def getUserName(deviceID:String) : String = {
