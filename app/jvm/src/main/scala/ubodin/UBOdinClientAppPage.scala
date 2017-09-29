@@ -147,3 +147,231 @@ hr{
 	height: 0;
 }</style>"""
 }
+
+object UBOdinPlotGenerator {
+  
+  def testplot(): String = {
+    var datatsv = "["
+    var randVal = Math.random()
+    var pow = 3.0
+    for(i <- 1 to 1200 by 8){ 
+      pow = 3.0 + (Math.random()/50.0)
+      if(randVal < 0.3 && randVal > 0.2)
+        randVal =  1.0 + (Math.random()/50.0)
+      else if(randVal > 0.9)
+        randVal =  1.0 - (Math.random()/60.0)
+      else if(randVal < 0.1)
+        randVal =  1.0 + (Math.random()/30.0)
+      else if(randVal < 0.2)
+        randVal = 1.0 - (Math.random()/20.0)
+      else
+        randVal = 1.0 + (Math.random()/20.0)
+      datatsv+=s"\n{xval:${i}, yval:${Math.pow((randVal*i.toDouble)/500.0,pow)}}${if(i==1193) "" else ","}"
+      randVal = Math.random()
+    }
+    datatsv += "]"
+    getPlotHtml(datatsv,"curveStepAfter","Test Plot", "Date", "Close")
+  }
+  
+  
+  def getd3():String = {
+  ""
+  }
+  
+  def getPlotHtml(data : String, curveType:String, title:String, xaxisLabel:String = "X Axis", yaxisLabel:String = "Y Axis", lineColor:String = "#ffab00"): String = {
+    """<html>
+    <head>
+    <meta charset="utf-8">
+    <title>"""+title+"""</title>
+    <style>
+      html,body, {
+          width: 100%;
+          height: 100%;
+      }
+      
+      #graph {
+        width: calc(100% - 10px);
+        height: calc(100% - 10px);
+      }
+      
+      .valueLine{
+          fill:none;
+          stroke:"""+lineColor+""";
+      }
+      
+      .valueErr{
+          fill:red;
+      }
+      
+      .tick line {
+          stroke-dasharray: 2 2 ;
+          stroke: #ccc;
+      }
+    </style>
+    </head>
+    <body>
+    <div id="graph"></div>  
+    <script src="/app/assets/d3.min.js"></script>
+    <script>
+    !(function(){
+        "use strict"
+        
+        var width,height
+        var chartWidth, chartHeight
+        var margin
+        var svg = d3.select("#graph").append("svg")
+        var axisLayer = svg.append("g").classed("axisLayer", true)
+        var chartLayer = svg.append("g").classed("chartLayer", true)
+        
+        var xScale = d3.scaleLinear()
+        var yScale = d3.scaleLinear()
+        
+        
+        var jsonData = """+data+""";
+        
+        var xMin = d3.min(jsonData, function(d){ return d.xval.val})
+        var yMin = d3.min(jsonData, function(d){ return d.yval.val})
+        var xMax = d3.max(jsonData, function(d){ return d.xval.val})
+        var yMax = d3.max(jsonData, function(d){ return d.yval.val})
+        yMin = yMin - (yMax*0.1)
+        yMax = yMax + (yMax*0.1)
+        
+        main(jsonData);
+                
+        function main(data) {
+            update(data)
+            setReSizeEvent(data)
+        }
+        
+        
+        function update(data) {
+            setSize(data)
+            drawAxis()
+            drawChart(data)        
+        }
+    
+        function setReSizeEvent(data) {
+            var resizeTimer;
+            var interval = Math.floor(1000 / 60 * 10);
+             
+            window.addEventListener('resize', function (event) {
+                
+                if (resizeTimer !== false) {
+                    clearTimeout(resizeTimer);
+                }
+                resizeTimer = setTimeout(function () {
+                    update(data)
+                }, interval);
+            });
+        }
+        
+        
+        function setSize(data) {
+            width = document.querySelector("#graph").clientWidth
+            height = document.querySelector("#graph").clientHeight
+        
+            margin = {top:40, left:60, bottom:40, right:60 }
+            
+            chartWidth = width - (margin.left+margin.right)
+            chartHeight = height - (margin.top+margin.bottom)
+            
+            svg.attr("width", width).attr("height", height)
+            axisLayer.attr("width", width).attr("height", height)
+            
+            chartLayer
+                .attr("width", chartWidth)
+                .attr("height", chartHeight)
+                .attr("transform", "translate("+[margin.left, margin.top]+")")
+                
+            
+                
+            xScale.domain([xMin, xMax]).range([0, chartWidth])
+            yScale.domain([yMin, yMax]).range([chartHeight, 0])
+                
+        }
+        
+        function filterJson(collection, predicate)
+        {
+            var result = new Array();
+            var length = collection.length;
+            for(var j = 0; j < length; j++)
+            {
+                if(predicate(collection[j]) == true)
+                {
+                     result.push(collection[j]);
+                }
+            }
+            console.log(result);
+            return result;
+        }
+        
+        function drawChart(data) {
+            var t = d3.transition()
+                .duration(1000)
+                .ease(d3.easeLinear)
+                .on("start", function(d){ console.log("transiton start") })
+                .on("end", function(d){ console.log("transiton end") })
+            
+            
+            var lineGen = d3.line()
+                .x(function(d) { return xScale(d.xval.val) })
+                .y(function(d) { return yScale(d.yval.val) })
+                .curve(d3."""+curveType+""")
+               
+            var selectedLineElm = chartLayer.selectAll(".valueLine")
+                .data([data])
+            
+            var newLineElm = selectedLineElm.enter().append("path")
+                .attr("class", "valueLine")
+    
+            selectedLineElm.merge(newLineElm)
+                .attr("d", lineGen)
+            
+            
+            var selectedDotElm = chartLayer.selectAll(".valueErr")
+                .data(filterJson(data, function(element){ return !element.yval.det }))
+            
+            var newDotElm = selectedDotElm.enter().append("circle")  
+                .attr("r", 2)           
+                .attr("cx", function(d) { return xScale(d.xval.val); })       
+                .attr("cy", function(d) { return yScale(d.yval.val); })
+                .attr("class", "valueErr")  
+    
+            selectedDotElm.merge(newDotElm)
+                       
+        }
+        
+        function drawAxis(){
+            var yAxis = d3.axisLeft(yScale)
+                .tickSizeInner(-chartWidth)
+            
+            var selectedYAxisElm = axisLayer.selectAll(".y")
+                .data(["dummy"])
+                
+            var newYAxisElm = selectedYAxisElm.enter().append("g")
+                .attr("class", "axis y")
+                
+            selectedYAxisElm.merge(newYAxisElm)
+                .attr("transform", "translate("+[margin.left, margin.top]+")")
+                .call(yAxis);
+                
+            var xAxis = d3.axisBottom(xScale)
+        
+            var selectedXAxisElm = axisLayer.selectAll(".x")
+                .data(["dummy"])
+                
+            var newXAxisElm = selectedXAxisElm.enter().append("g")
+                .attr("class", "axis x")
+        
+            selectedXAxisElm.merge(newXAxisElm)
+                .attr("transform", "translate("+[margin.left, chartHeight+margin.top]+")")
+                .call(xAxis);
+            
+        }
+    }());
+    </script>  
+    </body>
+    </html>
+    """
+  }
+}

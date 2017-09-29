@@ -180,12 +180,19 @@ object UBOdinCleaningJobPage {
     ///------------------------------------
     /// WebSocket Code
     ///------------------------------------
-    val wsurl = "wss://localhost:8089/ws/"
+    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+):[\\d]+.*".r
+    val (wsscheme, wshost) = dom.document.URL match {
+      case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host)
+      case _ => ("wss", "localhost")
+    }
+    val wsurl = s"$wsscheme://$wshost:8089/ws/"
     def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
-       t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
+      println("WS Request: " + requestType) 
+      t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
            case None => s.webSocketState.handlers
            case Some(cb) => s.webSocketState.handlers += (s.webSocketState.outMessageCount + 1) -> cb
          } )).wslog(s"sending web socket request: $requestType") , t.state.flatMap( s => {
+            println(s"WebSocket handlers ${s.webSocketState.handlers}")
             val req = upickle.write(WSRequestWrapper(deviceFingerprint, requestType, s.webSocketState.outMessageCount, msg)) 
             Callback(ws.send(req))
           }))
@@ -205,9 +212,10 @@ object UBOdinCleaningJobPage {
           // These are message-receiving events from the WebSocket "thread".
           def onmessage(e: MessageEvent): Unit = {
             val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
+            println(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType}")
             direct.modState(_.copy().wslog(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType} Size: ${respWrapped.response.length()}"),
             (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, 
-                defaultHandler( Callback.warn("WS Response Not Handled: " + respWrapped.responseType) )
+                defaultHandler( Callback.warn("WS Response Not Handled: " + respWrapped.responseUID + " -> " + respWrapped.responseType + ": " + e.data.toString) )
               )(respWrapped.response)) >> t.modState(s=>s.copy(progressState = ProgressState(s.progressState.loading -1), webSocketState = s.webSocketState.copy(handlers = (s.webSocketState.handlers -= respWrapped.responseUID)))))
           }
     
@@ -932,6 +940,9 @@ object UBOdinCleaningJobPage {
             }
             case "DATA" => {   
               <.div(Style.cleaningSection)(
+                  <.div(Style.mapSection)(
+                      <.iframe(^.width := "100%", ^.height := "100%", ^.scrolling := "false", ^.src := s"/plot/$deviceFingerprint/$cleaningJobID/"  )()     
+                  ),
                   <.div(Style.cleaningTableSection)(
                     if(S.dataTableState.loaded)
                       ODInTable(data = S.dataTableState.data.data, columns = S.dataTableState.data.cols.toList, totalRows = S.dataTableState.totalRecords, config = S.dataTableState.config, afterNextPage, afterPrevPage, Some(onTableRowSelect), Some(uncertaintyRowHighlight))

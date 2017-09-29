@@ -132,7 +132,12 @@ object UBOdinModerationPage {
     ///------------------------------------
     /// WebSocket Code
     ///------------------------------------
-    val wsurl = "wss://localhost:8089/ws/"
+    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+):[\\d]+.*".r
+    val (wsscheme, wshost) = dom.document.URL match {
+      case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host)
+      case _ => ("wss", "localhost")
+    }
+    val wsurl = s"$wsscheme://$wshost:8089/ws/"
     def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
        t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
            case None => s.webSocketState.handlers

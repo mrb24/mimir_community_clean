@@ -113,7 +113,7 @@ object UBOdinHomePage {
     
     def render(P: RouterCtl[Page], S: State) = {
       val userName = S.userInfo match {
-        case None => "User"
+        case None => deviceFingerprint
         case Some(UserInfoData(_, fname, _, _, _)) => fname
       }
       <.div(

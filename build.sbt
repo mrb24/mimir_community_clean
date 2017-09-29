@@ -77,6 +77,9 @@ val app = crossProject.settings(
     "org.scala-lang" % "scala-compiler" % scalaVersion.value % Provided,
     "org.xerial"     %   "sqlite-jdbc"  % "3.16.1",
   	"info.mimirdb" %% "mimir-core" % "0.2",
+  	//spark ml
+    "org.apache.spark" % "spark-sql_2.11" % "2.2.0",
+    "org.apache.spark" % "spark-mllib_2.11" % "2.2.0",
   	"net.sf.py4j" % "py4j" % "0.10.4"
   )
 )

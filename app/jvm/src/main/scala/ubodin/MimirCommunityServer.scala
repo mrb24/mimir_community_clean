@@ -38,6 +38,7 @@ import mimir.exec.result.Row
 import mimir.models.SourcedFeedbackT
 import mimir.models.FeedbackSourceIdentifier
 import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
+import mimir.algebra.NullPrimitive
 
 class MainServlet() extends HttpServlet {
   override def doPost(req : HttpServletRequest, resp : HttpServletResponse) = {
@@ -66,12 +67,27 @@ class MainServlet() extends HttpServlet {
   }
   override def doGet(req : HttpServletRequest, resp : HttpServletResponse) = {
     println(req.getPathInfo)
-    var responseStr = UBOdinClientAppPage.skeleton().render;
-    if(req.getPathInfo.matches("\\/genpdf\\/?")){
-      if(req.getParameter("task") != null){
-       
+    
+    val rootParhRegex = "\\/([\\w\\d_-]+)\\/.*".r
+    var responseStr: String = ""
+    
+    req.getPathInfo match {
+      case rootParhRegex(rootPath) => {
+        rootPath match {
+          case "plot" => {
+            val devJobRegex = "\\/plot\\/([\\d.-]+)/(\\d+)/".r
+            req.getPathInfo match {
+              case devJobRegex(deviceID, cleaningJobID) => responseStr = SharedServlet.getCleaningJobDataPlot(deviceID, cleaningJobID, None, None)
+            }
+          }
+          case _ => responseStr = UBOdinClientAppPage.skeleton().render;
+        }
       }
+      case _ => responseStr = UBOdinClientAppPage.skeleton().render;
     }
+    
+     
+    
    
     val os = resp.getOutputStream()
             resp.setHeader("Content-type", "text/html");
@@ -103,7 +119,7 @@ class MCCWebSocket extends WebSocketAdapter
         if (isConnected())
         {
           val request = upickle.read[WSRequestWrapper](message)
-          println(request.deviceID + ": "+request.requestType)
+          println("WS Request -> " + request.deviceID + ": "+request.requestType)
           SharedServlet.webSocketConnections.get(request.deviceID) match {
             case None => SharedServlet.webSocketConnections(request.deviceID) = this
             case Some(ws) => {}
@@ -209,7 +225,11 @@ object SharedServlet {
       }
       case LoginRequest(deviceID) => {
         val cleaningJobs = getCleaningJobList(deviceID)
-        (LoginResponse(UserInfoResponse(getUserInfo(deviceID).head), CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs))))
+        val userInfo = getUserInfo(deviceID) 
+        userInfo match {
+          case List() => (NoResponse())
+          case _ => (LoginResponse(UserInfoResponse(userInfo.head), CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs))))
+        }
       }
       case CleaningJobRepairRequest(deviceID, cleaningJobID, model, idx, args, repairValue) => {
         println(s"Repair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, repair:$repairValue")
@@ -283,7 +303,7 @@ object SharedServlet {
           .apply() 
          }).isEmpty){
          NamedDB("mimir_community_server") autoCommit  { implicit session =>
-           sql"INSERT INTO DEVICES (DEVICE_ID, DEVICE_UID) VALUES(0, ${deviceID})" // don't worry, prevents SQL injection
+           sql"INSERT INTO DEVICES ( DEVICE_UID) VALUES( ${deviceID})" // don't worry, prevents SQL injection
             .execute                
             .apply() 
            }
@@ -425,6 +445,32 @@ object SharedServlet {
         cleaningJobData.toVector
   }
   
+  def getCleaningJobDataPlot(deviceID:String, cleaningJobID:String, xCol:Option[String], yCol:Option[String]) : String = {
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
+    val cleaningJobDataPlot = NamedDB("mimir_community_server") autoCommit { implicit session =>
+         sql"select cj.CLEANING_JOB_NAME, cjd.* from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj ON cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID WHERE cjd.CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
+           .map(rs => {
+             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+             val oper = MimirVizier.parseQuery(query)
+             val plotProjectArgs = Seq(
+               xCol match {
+                 case None => mimir.algebra.ProjectArg("xval", mimir.algebra.Var(oper.columnNames.head))
+                 case Some(col) => mimir.algebra.ProjectArg("xval", mimir.algebra.Var(col))
+               },
+               yCol match {
+                 case None => mimir.algebra.ProjectArg("yval", mimir.algebra.Var(oper.columnNames.last))
+                 case Some(col) => mimir.algebra.ProjectArg("yval", mimir.algebra.Var(col))
+               })
+             
+             val plotOper = mimir.algebra.Project(plotProjectArgs , oper)
+             val plotRes = MimirCommunityServer.queryMimirToJson(plotOper)
+             UBOdinPlotGenerator.getPlotHtml(plotRes, "curveStepAfter", rs.string("CLEANING_JOB_NAME"))
+          }).list.apply()
+        }
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
+    cleaningJobDataPlot.head
+  }
+  
   def getCleaningJobDataCount(deviceID:String, cleaningJobID:String) : Int = {
     val cleaningJobDataCount = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
@@ -563,13 +609,13 @@ object MimirCommunityServer {
   }
   
   def runWebService() : Unit = {
-    startSSLServer(new MainServlet())
-    //startServer(new MainServlet())
+    //startSSLServer(new MainServlet())
+    startServer(new MainServlet())
   }
   
   
   def startServer(theServlet: HttpServlet) {
-    val server = new Server(8080)
+    val server = new Server(8089)
     
     val http_config = new HttpConfiguration();
     server.addConnector(new ServerConnector( server,  new HttpConnectionFactory(http_config)) );
@@ -591,6 +637,17 @@ object MimirCommunityServer {
     servletContextHandler.setContextPath("/");
     val holder = new ServletHolder(theServlet);
     servletContextHandler.addServlet(holder, "/*");
+    
+    val wsHandler = new WebSocketServlet()
+	    {
+	        override def configure(factory:WebSocketServletFactory )
+	        {
+	            factory.getPolicy().setIdleTimeout(500000);
+	            factory.register(classOf[MCCWebSocket]);
+	        }
+	    }
+    val wsholder = new ServletHolder(wsHandler);
+    servletContextHandler.addServlet(wsholder, "/ws/*");
     
     val handlerList = new HandlerCollection();
     handlerList.setHandlers( Array[Handler](contextHandler, contextHandler2, servletContextHandler, new DefaultHandler()));
@@ -757,6 +814,42 @@ object MimirCommunityServer {
       }
     })
     println("")
+  }
+  
+  def queryMimirToJson(query:String): String = {
+    val oper = MimirVizier.parseQuery(query)
+    queryMimirToJson(oper)   
+  }
+  
+  def queryMimirToJson(oper:mimir.algebra.Operator) : String = {
+    mimirThread.runOnThread[String](new MimirRunnable[String](){
+      def run() = {
+        val results = new java.util.Vector[Row]()
+         var cols : Seq[String] = null
+         var colsIndexes : Seq[Int] = null
+         
+         MimirVizier.db.query(oper)( resIter => {
+             cols = resIter.schema.map(f => f._1)
+             colsIndexes = resIter.schema.zipWithIndex.map( _._2)
+             while(resIter.hasNext())
+               results.add(resIter.next)
+         })
+         val resCSV = results.toArray[Row](Array()).seq.map(row => {
+           val truples = colsIndexes.map( (i) => {
+             val pval = row(i) match {
+               case NullPrimitive() => "0"
+               case x => x.asString
+             }
+             s"${cols(i)}:{val:${pval},det:${row.isColDeterministic(i)}}" 
+           })
+           s"{${truples.mkString(",")}, rowdet:${row.isDeterministic()}, prov:${row.provenance.asString}}"
+         })
+         returnedValue = Some(s"[${resCSV.mkString(",")}]")
+      }
+    }) match {
+      case None => ""
+      case Some(ret) => ret
+    }
   }
   
   def queryMimir(query:String): (Vector[String], Vector[CleaningJobDataRow]) = {
