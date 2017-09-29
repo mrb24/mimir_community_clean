@@ -20,10 +20,6 @@ scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature",
 val scalajsReactVersion = "0.11.3"
 val scalaCSSVersion = "0.5.1"
 
-resolvers += "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository"
-resolvers += Resolver.mavenLocal
-resolvers += "MimirDB" at "http://maven.mimirdb.info/"
-
 val app = crossProject.settings(
   unmanagedSourceDirectories in Compile +=
     baseDirectory.value  / "shared" / "main" / "scala",
@@ -81,7 +77,10 @@ val app = crossProject.settings(
     "org.apache.spark" % "spark-sql_2.11" % "2.2.0",
     "org.apache.spark" % "spark-mllib_2.11" % "2.2.0",
   	"net.sf.py4j" % "py4j" % "0.10.4"
-  )
+  ),
+  resolvers += "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository",
+  resolvers += Resolver.mavenLocal,
+  resolvers += "MimirDB" at "http://maven.mimirdb.info/"
 )
 
 
