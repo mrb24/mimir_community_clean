@@ -132,9 +132,10 @@ object UBOdinModerationPage {
     ///------------------------------------
     /// WebSocket Code
     ///------------------------------------
-    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)(?:(:[\\d]+))?.*".r
+    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)\\/.*".r
+    val urlRegexPort = "([https]+):\\/\\/([\\d\\w.-]+)(:[\\d]+).*".r
     val (wsscheme, wshost, wsport) = dom.document.URL match {
-      case urlRegex(scheme, host, port) => (if(scheme.equals("https")) "wss" else "ws" , host, port)
+      case urlRegexPort(scheme, host, port) => (if(scheme.equals("https")) "wss" else "ws" , host, port)
       case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
       case _ => ("wss", "localhost", ":8089")
     }
