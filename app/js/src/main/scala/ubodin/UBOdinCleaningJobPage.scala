@@ -118,7 +118,7 @@ object UBOdinCleaningJobPage {
                    addressState:AddressState = AddressState("","","",""),
                    baseTheme: MuiRawTheme = Mui.Styles.LightRawTheme,
                    backgroundColor: js.UndefOr[MuiColor] = js.undefined,
-                   webSocketState: WebSocketState = WebSocketState(0, None, scala.collection.mutable.Map())
+                   webSocketState: WebSocketState = WebSocketState(false, 0, None, scala.collection.mutable.Map())
                    ){
   val theme: MuiTheme =
     Mui.Styles.getMuiTheme(backgroundColor.fold(baseTheme)(
@@ -144,7 +144,7 @@ object UBOdinCleaningJobPage {
   case class MapState(center:LatLng, markers: List[Marker], zoom:Int, cluster:Boolean)  
   case class AddressState(houseNumber:String, streetName:String, city:String, state:String)
   case class ProgressState(loading:Int)
-  case class WebSocketState(outMessageCount:Int, ws:Option[WebSocket], handlers:scala.collection.mutable.Map[Int, String => Callback])
+  case class WebSocketState(hasConnected:Boolean, outMessageCount:Int, ws:Option[WebSocket], handlers:scala.collection.mutable.Map[Int, String => Callback])
   
   case class MainMenuChoice(id: String, text: String, settingOption:Option[SettingOption])
     
@@ -187,7 +187,7 @@ object UBOdinCleaningJobPage {
       case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
       case _ => ("wss", "localhost", ":8089")
     }
-    val wsurl = s"$wsscheme://${wshost}$wsport/ws/"
+    val wsurl = s"$wsscheme://${wshost}o$wsport/ws/"
     def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
       println("WS Request: " + requestType) 
       t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
@@ -223,12 +223,18 @@ object UBOdinCleaningJobPage {
     
           def onerror(e: ErrorEvent): Unit = {
             // Display error message
-            direct.modState(_.wslog(s"Error: ${e}"))
+            direct.modState(_.wslog(s"Error: ${e.toLocaleString()}"))
           }
     
           def onclose(e: CloseEvent): Unit = {
             // Close the connection
-            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"))
+            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"), t.state.flatMap(s => s.webSocketState.hasConnected match {
+              case true => Callback.info("will fallback to ajax for future requests")
+              case false => failureCB match {
+                case Some((str,cb)) => cb(str)
+                case None => Callback.info("failed to connect: no on failure")
+              }
+            }))
           }
     
           // Create WebSocket and setup listeners
@@ -242,8 +248,8 @@ object UBOdinCleaningJobPage {
           def onopen(e: Event): Unit = {
             wsRequest(ws, "NoRequest", upickle.write(NoRequest())).runNow()
             openCB match {
-              case Some((str, cb)) => direct.modState(_.wslog("Connected."), cb(str))
-              case None => direct.modState(_.wslog("Connected."))
+              case Some((str, cb)) => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."), cb(str))
+              case None => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."))
             }
           }
           

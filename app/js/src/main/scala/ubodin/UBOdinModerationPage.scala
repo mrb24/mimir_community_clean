@@ -98,7 +98,7 @@ object UBOdinModerationPage {
                    drawerState:DrawerState = DrawerState(Seq(), Seq(), None, false, true, false),
                    baseTheme: MuiRawTheme = Mui.Styles.LightRawTheme,
                    backgroundColor: js.UndefOr[MuiColor] = js.undefined,
-                   webSocketState: WebSocketState = WebSocketState(0, None, scala.collection.mutable.Map())
+                   webSocketState: WebSocketState = WebSocketState(false, 0, None, scala.collection.mutable.Map())
                    ){
   val theme: MuiTheme =
     Mui.Styles.getMuiTheme(backgroundColor.fold(baseTheme)(
@@ -117,7 +117,7 @@ object UBOdinModerationPage {
   case class TaskListState(loaded:Boolean, data:List[CleaningJobTaskGroup])
   case class DrawerState(choices:Seq[MainMenuChoice], selected:Seq[String], selectedWaitingCallback:Option[MainMenuChoice] = None, open:Boolean, docked:Boolean, right:Boolean)
   case class ProgressState(loading:Int)
-  case class WebSocketState(outMessageCount:Int, ws:Option[WebSocket], handlers:scala.collection.mutable.Map[Int, String => Callback])
+  case class WebSocketState(hasConnected:Boolean, outMessageCount:Int, ws:Option[WebSocket], handlers:scala.collection.mutable.Map[Int, String => Callback])
   
   case class MainMenuChoice(id: String, text: String, settingOption:Option[SettingOption])
     
@@ -179,12 +179,18 @@ object UBOdinModerationPage {
     
           def onerror(e: ErrorEvent): Unit = {
             // Display error message
-            direct.modState(_.wslog(s"Error: ${e}"))
+            direct.modState(_.wslog(s"Error: ${e.toLocaleString()}"))
           }
     
           def onclose(e: CloseEvent): Unit = {
             // Close the connection
-            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"))
+            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"), t.state.flatMap(s => s.webSocketState.hasConnected match {
+              case true => Callback.info("will fallback to ajax for future requests")
+              case false => failureCB match {
+                case Some(cb) => cb()
+                case None => Callback.info("failed to connect: no on failure")
+              }
+            }))
           }
     
           // Create WebSocket and setup listeners
@@ -197,8 +203,8 @@ object UBOdinModerationPage {
           def onopen(e: Event): Unit = {
             wsRequest(ws, "NoRequest", upickle.write(NoRequest())).runNow()
             openCB match {
-              case Some(cb) => direct.modState(_.wslog("Connected."), cb())
-              case None => direct.modState(_.wslog("Connected."))
+              case Some(cb) => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."), cb())
+              case None => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."))
             }
           }
           
