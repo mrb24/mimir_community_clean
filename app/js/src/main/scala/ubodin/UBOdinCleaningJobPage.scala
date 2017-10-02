@@ -230,6 +230,7 @@ object UBOdinCleaningJobPage {
           }
     
           // Create WebSocket and setup listeners
+          println(s"Connecting WebSocket: $wsurl")
           val ws = new WebSocket(wsurl)
           ws.onopen = onopen _
           ws.onclose = onclose _
@@ -274,9 +275,9 @@ object UBOdinCleaningJobPage {
       t.state.flatMap( s => {
         s.webSocketState.ws match {
           //if web socket available, then use that instead
-          case Some(webSoc) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
+          case Some(webSoc) if(webSoc.readyState == 1) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
           //otherwise, use a stinky old ajax request
-          case None => ajaxRequesta(url, data, cb)
+          case _ => ajaxRequesta(url, data, cb)
         }
       })
     }
