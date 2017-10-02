@@ -187,7 +187,7 @@ object UBOdinCleaningJobPage {
       case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
       case _ => ("wss", "localhost", ":8089")
     }
-    val wsurl = s"$wsscheme://${wshost}o$wsport/ws/"
+    val wsurl = s"$wsscheme://${wshost}$wsport/ws/"
     def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
       println("WS Request: " + requestType) 
       t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
