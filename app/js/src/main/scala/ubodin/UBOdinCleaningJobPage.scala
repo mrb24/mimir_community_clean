@@ -180,7 +180,7 @@ object UBOdinCleaningJobPage {
     ///------------------------------------
     /// WebSocket Code
     ///------------------------------------
-    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)(?:(:[\\d]+)).*".r
+    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)(?:(:[\\d]+))?.*".r
     val (wsscheme, wshost, wsport) = dom.document.URL match {
       case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
       case urlRegex(scheme, host, port) => (if(scheme.equals("https")) "wss" else "ws" , host, port)
