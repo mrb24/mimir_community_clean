@@ -132,12 +132,13 @@ object UBOdinModerationPage {
     ///------------------------------------
     /// WebSocket Code
     ///------------------------------------
-    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+):[\\d]+.*".r
-    val (wsscheme, wshost) = dom.document.URL match {
-      case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host)
-      case _ => ("wss", "localhost")
+    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)(?:(:[\\d]+)).*".r
+    val (wsscheme, wshost, wsport) = dom.document.URL match {
+      case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
+      case urlRegex(scheme, host, port) => (if(scheme.equals("https")) "wss" else "ws" , host, port)
+      case _ => ("wss", "localhost", ":8089")
     }
-    val wsurl = s"$wsscheme://$wshost:8089/ws/"
+    val wsurl = s"$wsscheme://${wshost}$wsport/ws/"
     def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
        t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
            case None => s.webSocketState.handlers
@@ -230,9 +231,9 @@ object UBOdinModerationPage {
       t.state.flatMap( s => {
         s.webSocketState.ws match {
           //if web socket available, then use that instead
-          case Some(webSoc) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
+          case Some(webSoc) if(webSoc.readyState == 1) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
           //otherwise, use a stinky old ajax request
-          case None => ajaxRequesta(url, data, cb)
+          case _ => ajaxRequesta(url, data, cb)
         }
       })
     }
