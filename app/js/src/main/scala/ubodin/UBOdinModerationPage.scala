@@ -25,7 +25,7 @@ import scalacss.ScalaCssReact._
 import org.scalajs.dom.{WebSocket, MessageEvent, Event, CloseEvent, ErrorEvent}
 import scala.util.{Success, Failure}
 
-object UBOdinModerationPage {
+object UBOdinModerationPage extends NetworkInterface {
   import RCustomStyles._
   import Mui.SvgIcons.{ ActionInfo, AlertWarning, ActionInfoOutline, AlertError, AlertErrorOutline, ActionCheckCircle }
   import MuiAutoCompleteFilters.caseInsensitiveFilter
@@ -130,136 +130,12 @@ object UBOdinModerationPage {
     
     
     ///------------------------------------
-    /// WebSocket Code
+    /// Network Communication Code
     ///------------------------------------
-    val urlRegex = "([https]+):\\/\\/([\\d\\w.-]+)\\/.*".r
-    val urlRegexPort = "([https]+):\\/\\/([\\d\\w.-]+)(:[\\d]+).*".r
-    val (wsscheme, wshost, wsport) = dom.document.URL match {
-      case urlRegexPort(scheme, host, port) => (if(scheme.equals("https")) "wss" else "ws" , host, port)
-      case urlRegex(scheme, host) => (if(scheme.equals("https")) "wss" else "ws" , host, "")
-      case _ => ("wss", "localhost", ":8089")
-    }
-    val wsurl = s"$wsscheme://${wshost}$wsport/ws/"
-    def wsRequest(ws: WebSocket, requestType:String, msg: String, cbo:Option[String => Callback] = None ): Callback = {
-       t.modState( s => s.copy(progressState = ProgressState(s.progressState.loading +1 ), webSocketState = s.webSocketState.copy(outMessageCount = s.webSocketState.outMessageCount + 1, handlers = cbo match { 
-           case None => s.webSocketState.handlers
-           case Some(cb) => s.webSocketState.handlers += (s.webSocketState.outMessageCount + 1) -> cb
-         } )).wslog(s"sending web socket request: $requestType") , t.state.flatMap( s => {
-            val req = upickle.write(WSRequestWrapper(deviceFingerprint, requestType, s.webSocketState.outMessageCount, msg)) 
-            Callback(ws.send(req))
-          }))
-    } 
-    
-      def createWebSocket(successCB:Option[() => Callback] = None, failureCB:Option[ () => Callback], openCB:Option[() => Callback] = None): Callback = {
-    
-        // This will establish the connection and return the WebSocket
-        def connect = CallbackTo[WebSocket] {
-    
-          // Get direct access so WebSockets API can modify state directly
-          // (for access outside of a normal DOM/React callback).
-          // This means that calls like .setState will now return Unit instead of Callback.
-          val direct = t.accessDirect
-          def defaultHandler(cb:Callback) : String => Callback = str => cb
-          
-          // These are message-receiving events from the WebSocket "thread".
-          def onmessage(e: MessageEvent): Unit = {
-            val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
-            direct.modState(_.copy().wslog(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType} Size: ${respWrapped.response.length()}"),
-            (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, {
-              val resp = UBOdinAjaxResponse.readResponse(respWrapped.responseType, respWrapped.response)
-              resp match {
-                case response:NoResponse => defaultHandler( Callback.info("WS NoResponse"))
-                case response:CleaningJobTaskListResponse => defaultHandler(cleaningJobTaskListResponse(response, t))
-                case response:LoadCleaningJobResponse => defaultHandler( 
-                  t.modState(s => s.copy(cleaningJobType = response.job.jobType)))
-                case x => defaultHandler( Callback.warn("WS Response Not Handled: " + x.toString()) )
-              }
-            })(respWrapped.response)) >> t.modState(s=>s.copy(progressState = ProgressState(s.progressState.loading -1), webSocketState = s.webSocketState.copy(handlers = (s.webSocketState.handlers -= respWrapped.responseUID)))))
-          }
-    
-          def onerror(e: ErrorEvent): Unit = {
-            // Display error message
-            direct.modState(_.wslog(s"Error: ${e.toLocaleString()}"))
-          }
-    
-          def onclose(e: CloseEvent): Unit = {
-            // Close the connection
-            direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)).wslog(s"Closed: ${e.reason}"), t.state.flatMap(s => s.webSocketState.hasConnected match {
-              case true => Callback.info("will fallback to ajax for future requests")
-              case false => failureCB match {
-                case Some(cb) => cb()
-                case None => Callback.info("failed to connect: no on failure")
-              }
-            }))
-          }
-    
-          // Create WebSocket and setup listeners
-          val ws = new WebSocket(wsurl)
-          ws.onopen = onopen _
-          ws.onclose = onclose _
-          ws.onmessage = onmessage _
-          ws.onerror = onerror _
-          
-          def onopen(e: Event): Unit = {
-            wsRequest(ws, "NoRequest", upickle.write(NoRequest())).runNow()
-            openCB match {
-              case Some(cb) => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."), cb())
-              case None => direct.modState(s=>s.copy(webSocketState = s.webSocketState.copy(hasConnected = true)).wslog("Connected."))
-            }
-          }
-          
-          ws
-        }
-    
-        // Here use attemptTry to catch any exceptions in connect.
-        connect.attemptTry.flatMap {
-          case Success(ws)    => successCB match {
-            case Some(cb) => t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = Some(ws))), cb())
-            case None => t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = Some(ws))))
-          }
-          case Failure(error) => failureCB match {
-            case Some(cb) => cb()
-            case None => Callback.info(error.toString)
-          }
-        }
-      }
-    
-      def killWebSocket: Callback = {
-        def closeWebSocket = t.state.map(_.webSocketState.ws.foreach(_.close()))
-        def clearWebSocket = t.modState(s=>s.copy(webSocketState = s.webSocketState.copy(ws = None)))
-        closeWebSocket >> clearWebSocket
-      }
-    
-    
-    ///------------------------------------
-    ///  Ajax Loading Code
-    ///------------------------------------
-    def ajaxRequest(url:String, data:String, cb:String => Callback ): Callback = {
-      t.state.flatMap( s => {
-        s.webSocketState.ws match {
-          //if web socket available, then use that instead
-          case Some(webSoc) if(webSoc.readyState == 1) => wsRequest(webSoc, url.split("/").last, data, Some(cb))
-          //otherwise, use a stinky old ajax request
-          case _ => ajaxRequesta(url, data, cb)
-        }
-      })
-    }
-      
-    def ajaxRequesta(url:String, data:String, cb:String => Callback ): Callback = {
-      val reqType = url.split("/").last
-      val req = upickle.write(AjaxRequestWrapper(deviceFingerprint, reqType, data))
-      t.modState(s => s.copy(progressState = ProgressState(s.progressState.loading +1)).wslog(s"sending ajax request: $reqType")) >>
-      Callback.future(Ajax.post(url, req).map { xhr =>
-        cb(xhr.responseText) >> t.modState(s => s.copy(progressState = ProgressState(s.progressState.loading-1)))
-      })
-    }
-    
-    
-    
     def requestLoadCleaningJobsModerationList() : Callback = {
       val url = "/ajax/LoadCleaningJobsModerationRequest"
       val data = upickle.write(LoadCleaningJobsModerationRequest(deviceFingerprint))
-      ajaxRequest(url, data, responseText => {
+      network.ajaxRequest(url, data, responseText => {
         val cleaningJobLoadResponse = upickle.read[CleaningJobsModerationResponse](responseText)
         val newListData = cleaningJobLoadResponse.cleaningJobsTasks.map{
           case (cleaningJobID, moderationTasks:Vector[CleaningJobTaskGroup]) => {
@@ -273,7 +149,7 @@ object UBOdinModerationPage {
     def requestCleaningJobTaskList(cleaningJobID:String, count:Int, offset:Int) : Callback = {
       val url = "/ajax/CleaningJobTaskListRequest"
       val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, count, offset))
-      ajaxRequest(url, data, responseText => {
+      network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
         //cleaningJobTaskTreeResponse(xhr.responseText, t) 
@@ -283,7 +159,7 @@ object UBOdinModerationPage {
     def requestCleaningJobTaskFocusedList(cleaningJobID:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
       val url = "/ajax/CleaningJobTaskFocusedListRequest"
       val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, rowIDs, cols))
-      ajaxRequest(url, data, responseText => {
+      network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
         //cleaningJobTaskTreeResponse(xhr.responseText, t) 
@@ -309,7 +185,7 @@ object UBOdinModerationPage {
     def requestRepair(cleaningJobID:String, reason:CleaningJobTask, repairValue:String) : Callback = {
       val url = "/ajax/CleaningJobModRepairRequest"
       val data = upickle.write(CleaningJobModRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
-      ajaxRequest(url, data, responseText => {
+      network.ajaxRequest(url, data, responseText => {
         val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
         t.state.flatMap(s => requestLoadCleaningJobsModerationList())
       })
@@ -481,7 +357,8 @@ object UBOdinModerationPage {
   
     //boot up and load initial data
     def start : Callback  = {
-      createWebSocket( None, Some( requestLoadCleaningJobsModerationList _), Some( requestLoadCleaningJobsModerationList _) )
+      requestLoadCleaningJobsModerationList()
+      //createWebSocket( None, Some( requestLoadCleaningJobsModerationList _), Some( requestLoadCleaningJobsModerationList _) )
       //requestGetCleaningJobSettingsOptions(cleaningJobID) >> requestGetCleaningJobSettings(cleaningJobID) >> requestCleaningJobTaskList(cleaningJobID, 10, 0) >> requestCleaningData(cleaningJobID)
     }
       

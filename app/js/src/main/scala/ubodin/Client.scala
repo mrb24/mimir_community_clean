@@ -7,7 +7,9 @@ import scala.scalajs.js.JSApp
 
 object Client extends JSApp {
 
-override def main(): Unit = {
+  val deviceFingerprint = fingerprint.Fingerprint.get();
+  
+  override def main(): Unit = {
     // remove waiting page stuff
     if (!js.isUndefined(g.loadingElement)) {
       g.document.body.removeChild(g.loadingElement)

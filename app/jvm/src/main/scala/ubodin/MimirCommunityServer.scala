@@ -39,6 +39,8 @@ import mimir.models.SourcedFeedbackT
 import mimir.models.FeedbackSourceIdentifier
 import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 import mimir.algebra.NullPrimitive
+import mimir.algebra.Operator
+import mimir.parser.ExpressionParser
 
 class MainServlet() extends HttpServlet {
   override def doPost(req : HttpServletRequest, resp : HttpServletResponse) = {
@@ -231,6 +233,11 @@ object SharedServlet {
           case _ => (LoginResponse(UserInfoResponse(userInfo.head), CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs))))
         }
       }
+      case ualr@UserActionLogRequest(deviceID, eventType, target, xCoord, yCoord, scroll, timestamp, extra) => {
+        println(s"User Action Log: device:$deviceID, Event Type:$eventType, Target:$target, X:$xCoord, Y:$yCoord, Scroll:$scroll, Time:$timestamp, Res:$extra")
+        logUserAction(ualr);
+        (NoResponse())
+      }
       case CleaningJobRepairRequest(deviceID, cleaningJobID, model, idx, args, repairValue) => {
         println(s"Repair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, repair:$repairValue")
         MimirCommunityServer.feedbackSrc(deviceID, model, idx, args, repairValue);
@@ -393,9 +400,9 @@ object SharedServlet {
          sql"select cjd.*, cj.TYPE from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj on cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID" // don't worry, prevents SQL injection
           .map(rs => {
             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-            if(!processedQueries.contains(query)){
-              processedQueries.add(query)
-              MimirCommunityServer.explainEverything(MimirVizier.parseQuery(query)).map(reasonSet => {
+            if(!processedQueries.contains(query.toString)){
+              processedQueries.add(query.toString)
+              MimirCommunityServer.explainEverything(query).map(reasonSet => {
                  (rs.string("CLEANING_JOB_ID"), reasonSet.all(MimirVizier.db).flatMap(reason => { 
                   (reason.model match {
                      case sourcedFeedbackModel:SourcedFeedbackT[Any] => {
@@ -441,11 +448,27 @@ object SharedServlet {
            .map(rs => {
              val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
              val oper = count match {
-               case Some(limit) => MimirVizier.parseQuery(query).limit(limit, offset.getOrElse(0))
-               case None => MimirVizier.parseQuery(query)
+               case Some(limit) => query.limit(limit, offset.getOrElse(0))
+               case None => query
              }
              val queryRes = MimirCommunityServer.queryMimir(oper)
              CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), queryRes._1, queryRes._2)
+          }).list.apply()
+        }
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
+        cleaningJobData.toVector
+  }
+  
+  def getCleaningJobDataOperator(deviceID:String, cleaningJobID:String, count:Option[Int], offset:Option[Int]) : Vector[String] = {
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
+    val cleaningJobData = NamedDB("mimir_community_server") autoCommit { implicit session =>
+         sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
+           .map(rs => {
+             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+             mimir.serialization.Json.ofOperator(count match {
+               case Some(limit) => query.limit(limit, offset.getOrElse(0))
+               case None => query
+             }).toString
           }).list.apply()
         }
     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
@@ -457,8 +480,7 @@ object SharedServlet {
     val cleaningJobDataPlot = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select cj.CLEANING_JOB_NAME, cjd.* from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj ON cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID WHERE cjd.CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
-             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-             val oper = MimirVizier.parseQuery(query)
+             val oper = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
              val plotProjectArgs = Seq(
                xCol match {
                  case None => mimir.algebra.ProjectArg("xval", mimir.algebra.Var(oper.columnNames.head))
@@ -483,7 +505,7 @@ object SharedServlet {
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
              val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-             val oper = MimirVizier.parseQuery(query).count(false, "COUNT")
+             val oper = query.count(false, "COUNT")
              val queryRes = MimirCommunityServer.queryMimir(oper)
              queryRes._2.head.data.head.data.toInt
           }).single.apply()
@@ -491,7 +513,7 @@ object SharedServlet {
         cleaningJobDataCount.get
   }
   
-  def assembleCleaningJobDataQuery(deviceID:String, cleaningJobDataID:Int) : String = {
+  /*def assembleCleaningJobDataQuery(deviceID:String, cleaningJobDataID:Int) : String = {
     NamedDB("mimir_community_server") autoCommit { implicit session =>
       sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_DATA_ID = $cleaningJobDataID" // don't worry, prevents SQL injection
         .map(rs => {
@@ -511,6 +533,31 @@ object SharedServlet {
               case _ => ""
             }
             init + settingPart
+          })
+        }).single.apply().get
+     }
+  }*/
+  
+  def assembleCleaningJobDataQuery(deviceID:String, cleaningJobDataID:Int) : Operator = {
+    NamedDB("mimir_community_server") autoCommit { implicit session =>
+      sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_DATA_ID = $cleaningJobDataID" // don't worry, prevents SQL injection
+        .map(rs => {
+          val userCleaningJobSettings = NamedDB("mimir_community_server") autoCommit { implicit session =>
+           sql"Select s.* from DEVICES d join USER_DEVICES ud on ud.DEVICE_ID = d.DEVICE_ID join USERS u on u.USER_ID = ud.USER_ID join USER_CLEANING_JOB_SETTINGS us on us.USER_ID = u.USER_ID join CLEANING_JOB_SETTINGS s on s.CLEANING_JOB_SETTINGS_ID = us.CLEANING_JOB_SETTING_ID where d.DEVICE_UID = $deviceID AND s.CLEANING_JOB_DATA_ID = ${rs.int("CLEANING_JOB_DATA_ID")}"
+            .map(rssub => {
+              val settingType = rssub.string("TYPE") 
+              val settingJson = rssub.string("SETTING")
+              CleaningJobSetting.readSetting(settingType, settingJson)
+            })
+            .list 
+            .apply() 
+          }
+          val oper = MimirVizier.parseQuery(rs.string("QUERY"))
+          userCleaningJobSettings.foldLeft(oper)((init, setting) => {
+            setting match {
+              case CleaningJobFilterSetting(_, _, queryWhere) => oper.filter(ExpressionParser.expr(queryWhere)) 
+              case _ => oper
+            }
           })
         }).single.apply().get
      }
@@ -592,6 +639,17 @@ object SharedServlet {
            }
     MimirCommunityServer.setLocationMimir(savedLocation._1, savedLocation._2)
     savedLocation
+  }
+  
+  def logUserAction(userAction:UserActionLogRequest) : Unit = {
+    NamedDB("mimir_community_server") autoCommit  { implicit session =>
+           sql"""INSERT INTO USER_ACTION_LOG ( USER_ID, DEVICE_ID, USER_ACTION ) VALUES (
+                    (SELECT USER_ID FROM USER_DEVICES u WHERE u.DEVICE_ID = (SELECT DEVICE_ID FROM DEVICES WHERE DEVICE_UID = ${userAction.deviceID})),
+                    (SELECT DEVICE_ID FROM DEVICES WHERE DEVICE_UID = ${userAction.deviceID}),
+                    ${upickle.write(userAction)} )""" // don't worry, prevents SQL injection
+            .execute                
+            .apply() 
+           }
   }
   
   def list(path: String) = {
@@ -782,6 +840,18 @@ object MimirCommunityServer {
     }
   }
   
+  def explainSubset(oper:Operator, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainSubset(oper, rows, cols))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
   def explainSubset(query:String, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
     val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
       def run() = {
@@ -921,7 +991,7 @@ object MimirCommunityServer {
     val execQueue = new LinkedBlockingQueue[MimirRunnable[_]]()
     val returnQueue = new LinkedBlockingQueue[Any]()
     override def run() = {
-      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-PROVENANCE"*/, "NO-VISTRAILS", "QUIET-LOG"))
+      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-PROVENANCE"*/, "NO-VISTRAILS", "QUIET-LOG", "LOG"))
       while(true){
         val runnable = execQueue.take()
         runnable.run()

@@ -27,6 +27,11 @@ object UBOdinAjaxRequest {
       case "CleaningJobRepairRequest" => upickle.read[CleaningJobRepairRequest](request)
       case "CleaningJobModRepairRequest" => upickle.read[CleaningJobModRepairRequest](request)
       case "SetDeviceLocationRequest" => upickle.read[SetDeviceLocationRequest](request)
+      case "UserActionLogRequest" => upickle.read[UserActionLogRequest](request)
+      case "RollUpCleaningJobDataRequest" => upickle.read[RollUpCleaningJobDataRequest](request)
+      case "DrillDownCleaningJobDataRequest" => upickle.read[DrillDownCleaningJobDataRequest](request)
+      case "SliceCleaningJobDataRequest" => upickle.read[UserActionLogRequest](request)
+      case "DiceCleaningJobDataRequest" => upickle.read[UserActionLogRequest](request)
     }
   }
 }
@@ -71,6 +76,13 @@ case class SetDeviceLocationRequest(deviceID:String, lat:Double, lon:Double) ext
 case class CleaningJobRepairRequest(deviceID:String, cleaningJobID:String, model:String, idx:Int, args:Seq[String], repairValue:String) extends UBOdinAjaxRequest("CleaningJobRepairRequest") 
 
 case class CleaningJobModRepairRequest(deviceID:String, cleaningJobID:String, model:String, idx:Int, args:Seq[String], repairValue:String) extends UBOdinAjaxRequest("CleaningJobModRepairRequest") 
+
+case class UserActionLogRequest(deviceID:String, eventType:String, target:String, xCoord:Int, yCoord:Int, scroll:Int, timestamp:Long, extra:String) extends UBOdinAjaxRequest("UserActionLogRequest") 
+
+case class RollUpCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("RollUpCleaningJobDataRequest")
+case class DrillDownCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("DrillDownCleaningJobDataRequest")
+case class SliceCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("SliceCleaningJobDataRequest")
+case class DiceCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("DiceCleaningJobDataRequest")
 
 case class AjaxRequestWrapper(deviceID:String, requestType:String, request:String)
 case class WSRequestWrapper(deviceID:String, requestType:String, requestUID:Int, request:String)
