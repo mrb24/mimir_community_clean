@@ -19,4 +19,7 @@ object DatabaseManager {
     ConnectionPool.add("mimir_community_server", dbUrl, "", "", settings)
   
   }
+  def shutdownDatabase() : Unit = {
+    ConnectionPool.closeAll()
+  }
 }

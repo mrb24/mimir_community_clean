@@ -5,6 +5,7 @@ import ubodin.fascades.{LatLng, Marker, Icon, Size, Point}
 import chandu0101.scalajs.react.components.materialui._
 import ubodin.ODInTable.Config
 //import chandu0101.scalajs.react.components.materialui.{ Vertical, Horizontal, Origin, MuiPopover, MuiRaisedButton, MuiFlatButton, MuiDialog}
+import chandu0101.scalajs.react.components.materialui.Corners
 import japgolly.scalajs.react._
 import japgolly.scalajs.react.extra.router.RouterCtl
 import japgolly.scalajs.react.vdom.prefix_<^._
@@ -27,7 +28,7 @@ import scala.util.{Success, Failure}
 
 object UBOdinCleaningJobPage extends NetworkInterface {
   import RCustomStyles._
-  import Mui.SvgIcons.{ ActionInfo, AlertWarning, ActionInfoOutline, AlertError, AlertErrorOutline, ActionCheckCircle }
+  import Mui.SvgIcons.{ ActionInfo, AlertWarning, ActionInfoOutline, AlertError, AlertErrorOutline, ActionCheckCircle, ContentAdd, NavigationClose }
   import MuiAutoCompleteFilters.caseInsensitiveFilter
   
   val deviceFingerprint = Client.deviceFingerprint;
@@ -84,8 +85,19 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       ^.display := "flex" ,
       ^.flexWrap := "wrap" ,
       ^.flexGrow := "1",
-      ^.margin := "30px",
-      ^.maxHeight := "12%" )
+      ^.margin := "30px" )
+      
+    val sliceDiceInnerSection = Seq(
+      ^.display := "inline-block" ,
+      ^.margin := "30px" )
+      
+    val sliceDiceFilterSection = Seq(
+      ^.display := "block" ,
+      ^.margin := "30px" )
+      
+    val sliceDiceFilterRow = Seq(
+      ^.display := "block" ,
+      ^.margin := "5px" )
       
     val taskSection = Seq(
       MsFlexWrap := "wrap" ,
@@ -118,7 +130,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
   }
   
   
-  case class State(cleaningJobType:String = "",
+  case class State(cleaningJobTypeState:CleaningJobTypeState = CleaningJobTypeState(""),
                    gpsState:GPSLocationState = GPSLocationState(false, LatLng(42.8864 ,-78.8784), None),
                    latLonColsState:LatLonColsState = LatLonColsState("LATITUDE","LONGITUDE",4,5),
                    addrColsState:AddressColsState = AddressColsState("STRNUMBER","STRNAME","CITY","STATE",0,1,3,2),
@@ -136,6 +148,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                    drawerState:DrawerState = DrawerState(Seq(), Seq(), None, false, true, false),
                    mapState:MapState = MapState( LatLng(42.8864 ,-78.8784), List() , 14, true),
                    addressState:AddressState = AddressState("","","",""),
+                   sliceDiceState:SliceDiceState = SliceDiceState(Set(),Seq(),Seq(),Seq("AVG","SUM","COUNT","FIRST"),Seq()),
                    baseTheme: MuiRawTheme = Mui.Styles.LightRawTheme,
                    backgroundColor: js.UndefOr[MuiColor] = js.undefined
                    ){
@@ -162,6 +175,18 @@ object UBOdinCleaningJobPage extends NetworkInterface {
   case class DrawerState(choices:Seq[MainMenuChoice], selected:Seq[String], selectedWaitingCallback:Option[MainMenuChoice] = None, open:Boolean, docked:Boolean, right:Boolean)
   case class MapState(center:LatLng, markers: List[Marker], zoom:Int, cluster:Boolean)  
   case class AddressState(houseNumber:String, streetName:String, city:String, state:String)
+  case class SliceDiceState(rollUpGB:Set[String],gbCols:Seq[String],rollUpAggrs:Seq[SliceDiceAggr],aggrs:Seq[String],filters:Seq[SliceDiceFilter]){
+    def rollUpGBTouched(us: js.UndefOr[String]) = us.fold(this){
+      case s if rollUpGB contains s =>
+        copy(rollUpGB = rollUpGB - s)
+      case s =>
+        copy(rollUpGB = rollUpGB + s)
+    }
+  }
+  case class CleaningJobTypeState(name:String)
+  
+  case class SliceDiceFilter(id:String,col:String,op:String,value:String)
+  case class SliceDiceAggr(id:String,col:String,op:String)
   
   case class MainMenuChoice(id: String, text: String, settingOption:Option[SettingOption])
     
@@ -213,7 +238,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       val data = upickle.write(LoadCleaningJobRequest(deviceFingerprint, cleaningJobID))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobLoadResponse = upickle.read[LoadCleaningJobResponse](responseText)
-        t.modState(s => s.copy(cleaningJobType = cleaningJobLoadResponse.job.jobType),
+        t.modState(s => s.copy(cleaningJobTypeState = CleaningJobTypeState(cleaningJobLoadResponse.job.jobType)),
         getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >>
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
         cleaningJobDataCountResponse(cleaningJobLoadResponse.dataCount, t) >>
@@ -270,7 +295,18 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       println("cleaningJobDataResponse: " )
       val newTableData = cleaningJobDataResponse.cleaningJobData.head
       val config = newTableData.cols.map(col => (col, Some(uncertaintyCellHighlight), None, None) ).toList
-      t.modState(s => s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)) ),  pageChange(cleaningJobDataResponse.offset, newTableData.data)) 
+      t.modState(s => s.cleaningJobTypeState match {
+        case CleaningJobTypeState("GIS") => { 
+           s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), latLonColsState = s.latLonColsState.copy(latColIdx = newTableData.cols.indexOf(s.latLonColsState.latCol), lonColIdx = newTableData.cols.indexOf(s.latLonColsState.lonCol)), addrColsState = s.addrColsState.copy(houseNumberIdx = newTableData.cols.indexOf(s.addrColsState.houseNumber), streetIdx = newTableData.cols.indexOf(s.addrColsState.street), cityIdx = newTableData.cols.indexOf(s.addrColsState.city), stateIdx = newTableData.cols.indexOf(s.addrColsState.state)), sliceDiceState = s.sliceDiceState.copy(gbCols = newTableData.cols) )
+        }
+        case CleaningJobTypeState("DATA") => {   
+          s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), sliceDiceState = s.sliceDiceState.copy(gbCols = newTableData.cols) )
+        }
+        case CleaningJobTypeState("INTERACTIVE") => {  
+          println("Load Data: INTERACTIVE")
+          s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), sliceDiceState = s.sliceDiceState.copy(gbCols = newTableData.cols) )
+        }
+      },  pageChange(cleaningJobDataResponse.offset, newTableData.data) )
     }
     
     def requestCleaningDataAndCount(cleaningJobID:String, offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
@@ -415,7 +451,17 @@ object UBOdinCleaningJobPage extends NetworkInterface {
     
     def pageChange(offset:Int, tableRows:Vector[ODInTable.Model]) : Callback = {
       println(s"pageChange: offset: $offset rowCount:${tableRows.length}")
-      t.modState(s => s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))), 
+      t.modState(s => s.cleaningJobTypeState match {
+            case CleaningJobTypeState("GIS") => { 
+               s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))) 
+            }
+            case CleaningJobTypeState("DATA") => {   
+              s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows)) 
+            }
+            case CleaningJobTypeState("INTERACTIVE") => {  
+              s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows)) 
+            }
+          }, 
           requestCleaningJobTaskFocusedList(cleaningJobID, tableRows.flatMap(row => { 
             row match {
               case CleaningJobDataRow(_, _, prov) => Some(prov)
@@ -744,10 +790,68 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       //network.backend.createWebSocket( None, Some((cleaningJobID, requestLoadCleaningJob)), Some((cleaningJobID, requestLoadCleaningJob)) )
       //requestGetCleaningJobSettingsOptions(cleaningJobID) >> requestGetCleaningJobSettings(cleaningJobID) >> requestCleaningJobTaskList(cleaningJobID, 10, 0) >> requestCleaningData(cleaningJobID)
     }
+    
+    ///---------------------------------------
+    /// Slice and Dice Code
+    ///---------------------------------------
+    val onTouchTapRollUpGB: (TouchTapEvent, JsComponentM[HasValue[String], _, TopNode]) => Callback =
+      (e, elem) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.rollUpGBTouched(elem.props.value)))
+    
+    val onSliceDiceAggrColChange: SliceDiceAggr => (TouchTapEvent, Int, String) => Callback =
+      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(cfilter => {
+        cfilter.id match {
+          case filter.id => filter.copy(col = a)
+          case _ => cfilter
+        }
+      }))))
+      
+    val onSliceDiceAggrOpChange: SliceDiceAggr => (TouchTapEvent, Int, String) => Callback =
+      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(cfilter => {
+        cfilter.id match {
+          case filter.id => filter.copy(op = a)
+          case _ => cfilter
+        }
+      }))))
+      
+    val onAggrAddTouch: TouchTapEvent => Callback =
+      e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = (s.sliceDiceState.rollUpAggrs :+ new SliceDiceAggr(s.sliceDiceState.rollUpAggrs.length.toString(), s.sliceDiceState.gbCols.head, s.sliceDiceState.aggrs.head)))))
+    
+    val onAggrRemoveTouch: SliceDiceAggr => TouchTapEvent => Callback =
+      aggr => e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy( rollUpAggrs = s.sliceDiceState.rollUpAggrs.filterNot(_.equals(aggr)))))
+      
+    val onSliceDiceFilterChange: SliceDiceFilter => (TouchTapEvent, Int, String) => Callback =
+      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = s.sliceDiceState.filters.map(cfilter => {
+        cfilter.id match {
+          case filter.id => filter.copy(col = a)
+          case _ => cfilter
+        }
+      }))))
+      
+    val onSliceDiceFilterOpChange: SliceDiceFilter => (TouchTapEvent, Int, String) => Callback =
+      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = s.sliceDiceState.filters.map(cfilter => {
+        cfilter.id match {
+          case filter.id => filter.copy(op = a)
+          case _ => cfilter
+        }
+      }))))
+    
+    val onSliceDiceFilterTextChange: SliceDiceFilter => (ReactEvent, String) => Callback =
+      filter => (e, value) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = s.sliceDiceState.filters.map(cfilter => {
+        cfilter.id match {
+          case filter.id => filter.copy(value = value)
+          case _ => cfilter
+        }
+      }))))
+      
+    val onFilterAddTouch: TouchTapEvent => Callback =
+      e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = (s.sliceDiceState.filters :+ new SliceDiceFilter(s.sliceDiceState.filters.length.toString(), s.sliceDiceState.gbCols.head, "=",""))))) >> Callback.info("Filter Added")
+    
+    val onFilterRemoveTouch: SliceDiceFilter => TouchTapEvent => Callback =
+      filter => e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = s.sliceDiceState.filters.filterNot(_.equals(filter)) )))
       
     //render  
     def render(P: RouterCtl[Page], S: State) = {
-       println(s"render: ${ S.drawerState.selected } -> ${S.mapState.cluster}")
+       println(s"render: ${ S.drawerState.selected } -> ${S.mapState.cluster} -> ${S.sliceDiceState.filters}")
        val netState = network match {
          case null => NetworkCommState()
          case x if x == js.undefined => NetworkCommState()
@@ -839,8 +943,8 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           )  */
         ),
         
-          S.cleaningJobType match{
-            case "GIS" => { 
+          S.cleaningJobTypeState match{
+            case CleaningJobTypeState("GIS") => { 
              <.div(Style.cleaningSection)(
                   <.div(Style.mapSection)(
                       UBOdinGoogleMap(width = "100%",center = S.mapState.center, markers = S.mapState.markers, zoom = S.mapState.zoom, cluster = S.mapState.cluster)
@@ -853,7 +957,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                     )
               )
             }
-            case "DATA" => {   
+            case CleaningJobTypeState("DATA") => {   
               <.div(Style.cleaningSection)(
                   <.div(Style.mapSection)(
                       <.iframe(^.width := "100%", ^.height := "100%", ^.scrolling := "false", ^.src := s"/plot/$deviceFingerprint/$cleaningJobID/"  )()     
@@ -866,10 +970,67 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                   )
                 )
             }
-            case "INTERACTIVE" => {   
+            case CleaningJobTypeState("INTERACTIVE") => {   
               <.div(Style.cleaningSection)(
                   <.div(Style.sliceDiceSection)(
-                      "slice & dice"     
+                       MuiPaper(style = js.Dynamic.literal(width = "100%"))(
+                           <.div(Style.sliceDiceInnerSection)(
+                              <.div(Style.sliceDiceFilterSection)( 
+                                  S.sliceDiceState.filters.map( filter => {
+                                   <.div(Style.sliceDiceFilterRow)( 
+                                     MuiSelectField[String](
+                                        onChange = onSliceDiceFilterChange(filter),
+                                        value    = filter.col)(
+                                        S.sliceDiceState.gbCols.zipWithIndex.map(col => {
+                                          MuiMenuItem[String](key = col._2.toString, value = col._1, primaryText = col._1:ReactNode)()
+                                        }) ),
+                                     MuiSelectField[String](
+                                        onChange = onSliceDiceFilterOpChange(filter),
+                                        value    = filter.col)(
+                                        Seq("=","<",">","<=",">=","<>").zipWithIndex.map(op => {
+                                          MuiMenuItem[String](key = op._2.toString, value = op._1, primaryText = op._1:ReactNode)()
+                                        }) ),
+                                     MuiTextField(
+                                        hintText = "Hint Text":ReactNode,
+                                        onChange = onSliceDiceFilterTextChange(filter))(),
+                                     MuiIconButton(onTouchTap = onFilterRemoveTouch(filter))(NavigationClose()()))
+                                     } ), 
+                                  MuiIconButton(onTouchTap = onFilterAddTouch)(ContentAdd()())
+                              )
+                          ), 
+                          <.div(Style.sliceDiceInnerSection)(
+                              MuiMenu[String](
+                                desktop        = true,
+                                width          = "25%",
+                                value          = S.sliceDiceState.rollUpGB.toJsArray,
+                                multiple       = true,
+                                onItemTouchTap = onTouchTapRollUpGB
+                              )(
+                                S.sliceDiceState.gbCols.map(col => MuiMenuItem(value = col  )(col))
+                              ) 
+                          ), 
+                          <.div(Style.sliceDiceInnerSection)(
+                              <.div(Style.sliceDiceFilterSection)( 
+                                  S.sliceDiceState.rollUpAggrs.map( aggr => {
+                                   <.div(Style.sliceDiceFilterRow)( 
+                                     MuiSelectField[String](
+                                        onChange = onSliceDiceAggrOpChange(aggr),
+                                        value    = aggr.col)(
+                                        S.sliceDiceState.aggrs.zipWithIndex.map(op => {
+                                          MuiMenuItem[String](key = op._2.toString, value = op._1, primaryText = op._1:ReactNode)()
+                                        }) ),
+                                     MuiSelectField[String](
+                                        onChange = onSliceDiceAggrColChange(aggr),
+                                        value    = aggr.op)(
+                                        S.sliceDiceState.gbCols.zipWithIndex.map(col => {
+                                          MuiMenuItem[String](key = col._2.toString, value = col._1, primaryText = col._1:ReactNode)()
+                                        }) ),
+                                     MuiIconButton(onTouchTap = onAggrRemoveTouch(aggr))(NavigationClose()()))
+                                     } ), 
+                                  MuiIconButton(onTouchTap = onAggrAddTouch)(ContentAdd()())
+                              )
+                          )
+                       )    
                   ),
                   <.div(Style.cleaningFullTableSection)(
                     if(S.dataTableState.loaded)

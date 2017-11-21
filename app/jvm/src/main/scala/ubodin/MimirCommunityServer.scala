@@ -150,6 +150,7 @@ class MCCWebSocket extends WebSocketAdapter
     }
     
     def sendMessage(msg:UBOdinAjaxResponse, requestUID:Option[Int]) : Unit = {
+      //println(s"sending WS Message: ${requestUID}: ${msg}")
       getRemote().sendStringByFuture(upickle.write(WSResponseWrapper(msg.responseID, requestUID.getOrElse(-1), UBOdinAjaxResponse.writeResponse(msg))))
     }
 }
@@ -669,17 +670,30 @@ object MimirCommunityServer {
   def main(args: Array[String]) : Unit = {
     DatabaseManager.connectDatabases()
      
-    runWebService()
+    val server = runWebService()
+    
+    while (System.in.read() != -1) {
+      try {
+        Thread.sleep(1000)
+      } catch {
+        case t: Throwable => println("MimirCommunityServer: sleep interrupted: " + t.toString())
+      }
+    }
+    println("Shutting Down Server...")
+    running = false
+    mimirThread.interrupt()
+    server.stop()
+    DatabaseManager.shutdownDatabase()
     
   }
   
-  def runWebService() : Unit = {
+  def runWebService() : Server = {
     //startSSLServer(new MainServlet())
     startServer(new MainServlet())
   }
   
   
-  def startServer(theServlet: HttpServlet) {
+  def startServer(theServlet: HttpServlet) : Server = {
     val server = new Server(8089)
     
     val http_config = new HttpConfiguration();
@@ -721,9 +735,10 @@ object MimirCommunityServer {
     server.start()
     
      mimirThread.start()
+     server
   }
   
-  def startSSLServer(theServlet: HttpServlet){
+  def startSSLServer(theServlet: HttpServlet) : Server = {
     val contextFactory = new SslContextFactory( );
     contextFactory.setKeyStorePath("websoc.jks");
     contextFactory.setKeyStorePassword("emsys01");
@@ -799,8 +814,7 @@ object MimirCommunityServer {
     
     mimirThread.start()
     
-    //println(explainCell("SELECT * FROM LENS_MISSING_VALUE1914014057", 1, "3"))
-    
+    server
   }
   
   def explainCell(query:String, col:Int, row:String): Seq[String] = {
@@ -987,21 +1001,35 @@ object MimirCommunityServer {
     }
   }
   
+  var running = true;
+  
   class MimirThread extends Thread {
     val execQueue = new LinkedBlockingQueue[MimirRunnable[_]]()
     val returnQueue = new LinkedBlockingQueue[Any]()
     override def run() = {
       MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-PROVENANCE"*/, "NO-VISTRAILS", "QUIET-LOG", "LOG"))
-      while(true){
-        val runnable = execQueue.take()
-        runnable.run()
-        returnQueue.put( runnable.getReturnedValue )
+      while(running){
+        try {
+          val runnable = execQueue.take()
+          runnable.run()
+          returnQueue.put( runnable.getReturnedValue )
+        } catch {
+          case t: Throwable => println("MimirThread: take interrupted...")
+        }
+        
       }
     }
     def runOnThread[ReturnType](runnable:MimirRunnable[ReturnType]) : Option[ReturnType] = {
       synchronized {
-        execQueue.put(runnable)
-        returnQueue.take().asInstanceOf[Option[ReturnType]]
+        try{
+          execQueue.put(runnable)
+          returnQueue.take().asInstanceOf[Option[ReturnType]]
+        } catch {
+          case t: Throwable => {
+            println("MimirThread.runOnThread: take interrupted...")
+            None
+          }
+        }
       }
     }
   }
