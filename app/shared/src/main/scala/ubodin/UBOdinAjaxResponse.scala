@@ -59,6 +59,6 @@ case class UserInfoResponse(userInfo: UserInfoData) extends UBOdinAjaxResponse("
 
 case class LoginResponse(userInfo:UserInfoResponse, cleaningJobs:CleaningJobListResponse)  extends UBOdinAjaxResponse("LoginResponse")
 
-case class LoadCleaningJobResponse(job:CleaningJob, options:GetCleaningJobSettingsOptionsResponse, settings:GetCleaningJobSettingsResponse, taskList:CleaningJobTaskListResponse, data:CleaningJobDataResponse, dataCount:CleaningJobDataCountResponse) extends UBOdinAjaxResponse("LoadCleaningJobResponse")
+case class LoadCleaningJobResponse(job:CleaningJob, options:GetCleaningJobSettingsOptionsResponse, settings:GetCleaningJobSettingsResponse, taskList:CleaningJobTaskListResponse, taskListSchema:CleaningJobTaskListResponse, data:CleaningJobDataResponse, dataCount:CleaningJobDataCountResponse) extends UBOdinAjaxResponse("LoadCleaningJobResponse")
 
 case class WSResponseWrapper(responseType:String, responseUID:Int, response:String)

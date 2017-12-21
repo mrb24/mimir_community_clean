@@ -34,6 +34,7 @@ import javax.servlet.http.HttpServlet
 import javax.servlet.http.HttpServletResponse
 
 import mimir.MimirVizier
+import mimir.serialization.Json
 import mimir.exec.result.Row
 import mimir.models.SourcedFeedbackT
 import mimir.models.FeedbackSourceIdentifier
@@ -41,6 +42,10 @@ import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 import mimir.algebra.NullPrimitive
 import mimir.algebra.Operator
 import mimir.parser.ExpressionParser
+import mimir.algebra.Comparison
+import mimir.algebra.Aggregate
+import mimir.algebra.AggFunction
+import mimir.algebra.Var
 
 class MainServlet() extends HttpServlet {
   override def doPost(req : HttpServletRequest, resp : HttpServletResponse) = {
@@ -167,28 +172,36 @@ object SharedServlet {
         val cleaningJobs = getCleaningJobList(deviceID)
         (CleaningJobListResponse(Vector[CleaningJob]().union(cleaningJobs)))
       }
-      case CleaningJobTaskListRequest(deviceID, cleaningJobID, count, offset) =>  {
-        val cleaningJobs = getCleaningJobTaskList(deviceID, cleaningJobID, count, offset)
+      case CleaningJobTaskListRequest(deviceID, cleaningJobID, operator, count, offset) =>  {
+        val cleaningJobs = getCleaningJobTaskList(deviceID, cleaningJobID, operator, count, offset)
         (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
       }
-      case CleaningJobTaskFocusedListRequest(deviceID, cleaningJobID, rowIds, cols) =>  {
-        val cleaningJobs = getCleaningJobTaskFocusedList(deviceID, cleaningJobID, rowIds, cols)
+      case CleaningJobTaskListSchemaRequest(deviceID, cleaningJobID, operator, cols) =>  {
+        val cleaningJobs = getCleaningJobTaskListSchema(deviceID, cleaningJobID, operator, cols)
+        (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs))) 
+      }
+      case CleaningJobTaskFocusedListRequest(deviceID, cleaningJobID, operator, rowIds, cols) =>  {
+        val cleaningJobs = getCleaningJobTaskFocusedList(deviceID, cleaningJobID, operator, rowIds, cols)
         (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs)))
       }
       case LoadCleaningJobsModerationRequest(deviceID) =>  {
         val cleaningJobsModerations = getCleaningJobsModeration(deviceID)
         CleaningJobsModerationResponse(cleaningJobsModerations)
       }
-      case CleaningJobDataRequest(deviceID, cleaningJobID, count, offset) =>  {
-        val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, count, offset)
+      case CleaningJobDataRequest(deviceID, cleaningJobID, operStack, count, offset) =>  {
+        val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, operStack, count, offset)
         (CleaningJobDataResponse(cleaningJobData, count.getOrElse(5), offset.getOrElse(0)))
+      }
+      case RollUpCleaningJobDataRequest(deviceID, cleaningJobID, operator, filters, groupBy, aggrs) => {
+        val cleaningJobData = getCleaningJobDataRollUp(deviceID, cleaningJobID, operator, filters, groupBy, aggrs)
+        (CleaningJobDataResponse(cleaningJobData, 5, 0))
       }
       case CleaningJobDataCountRequest(deviceID, cleaningJobID) =>  {
         (CleaningJobDataCountResponse(getCleaningJobDataCount(deviceID, cleaningJobID)))
       }
       case CleaningJobDataAndCountRequest(deviceID, cleaningJobID, count, offset) =>  {
         val totalCount = getCleaningJobDataCount(deviceID, cleaningJobID)
-        val data = getCleaningJobData(deviceID, cleaningJobID, count, offset)
+        val data = getCleaningJobData(deviceID, cleaningJobID, Seq(), count, offset)
         (CleaningJobDataAndCountResponse(CleaningJobDataResponse(data, count.getOrElse(5), offset.getOrElse(0)), CleaningJobDataCountResponse(totalCount)))
       }
       case filterReq@CreateCleaningJobLocationFilterSettingRequest(deviceID, cleaningJobDataID, name, distance, latCol, lonCol, lat, lon) =>  {
@@ -212,12 +225,16 @@ object SharedServlet {
         val options = GetCleaningJobSettingsOptionsResponse(cleaningJobSettingsOptions.toVector)
         val cleaningJobSettings = getCleaningJobSettings(deviceID, cleaningJobID)
         val settings = GetCleaningJobSettingsResponse(cleaningJobSettings.toVector)
-        val cleaningJobTasks = getCleaningJobTaskList(deviceID, cleaningJobID, 10, 0)
+        val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, Seq(), Some(5), Some(0))
+        val rowids = cleaningJobData.head.data.map(row => row.prov)
+        val cleaningJobTasks = getCleaningJobTaskFocusedList (deviceID, cleaningJobID, cleaningJobData.head.operator.head, rowids, cleaningJobData.head.cols)
+        val cleaningJobTasksSchema = getCleaningJobTaskListSchema(deviceID, cleaningJobID, cleaningJobData.head.operator.head, cleaningJobData.head.cols)
         val tasks = CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobTasks))
-        val cleaningJobData = getCleaningJobData(deviceID, cleaningJobID, Some(5), Some(0))
+        val tasksSchema = CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobTasksSchema))
         val data = CleaningJobDataResponse(cleaningJobData, 5, 0)
-        val dataCount = CleaningJobDataCountResponse(getCleaningJobDataCount(deviceID, cleaningJobID))
-        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, data, dataCount))
+        println("getting count")
+        val dataCount = CleaningJobDataCountResponse(1000)//getCleaningJobDataCount(deviceID, cleaningJobID))
+        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, tasksSchema, data, dataCount))
       }
       case UserInfoRequest(deviceID) => {
         (UserInfoResponse(getUserInfo(deviceID).head))
@@ -240,12 +257,12 @@ object SharedServlet {
         (NoResponse())
       }
       case CleaningJobRepairRequest(deviceID, cleaningJobID, model, idx, args, repairValue) => {
-        println(s"Repair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, repair:$repairValue")
+        println(s"Repair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, args:$args, repair:$repairValue")
         MimirCommunityServer.feedbackSrc(deviceID, model, idx, args, repairValue);
         (NoResponse())
       }
       case CleaningJobModRepairRequest(deviceID, cleaningJobID, model, idx, args, repairValue) => {
-        println(s"ModRepair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, repair:$repairValue")
+        println(s"ModRepair: device:$deviceID, job:$cleaningJobID, model:$model, idx:$idx, args:$args, repair:$repairValue")
         MimirCommunityServer.feedback( model, idx, args, repairValue);
         (NoResponse())
       }
@@ -315,11 +332,13 @@ object SharedServlet {
               .updateAndReturnGeneratedKey 
               .apply() 
            }
+           val newUserID = createNewUser("User",deviceID)
            NamedDB("mimir_community_server") autoCommit  { implicit session =>
-             sql"INSERT INTO USER_DEVICES ( USER_ID, DEVICE_ID ) VALUES (2, ${deviceDBID})" // don't worry, prevents SQL injection
+             sql"INSERT INTO USER_DEVICES ( USER_ID, DEVICE_ID ) VALUES (${newUserID}, ${deviceDBID})" // don't worry, prevents SQL injection
               .execute() 
               .apply() 
            }
+           assignAllCleaningJobToUser(newUserID)
        }
        getUserInfo(deviceID)
      }
@@ -338,6 +357,31 @@ object SharedServlet {
         } 
   }
   
+  def createNewUser(firstName:String,lastName:String) : Long = {
+    NamedDB("mimir_community_server") autoCommit  { implicit session =>
+       sql"INSERT INTO USERS ( FIRST_NAME, LAST_NAME ) VALUES ( ${firstName},${lastName} )" // don't worry, prevents SQL injection
+        .updateAndReturnGeneratedKey 
+        .apply() 
+     }  
+  }
+                                                                                                            //when starship Enterprise (TNG) launches
+  def assignCleaningJobToUser(userID:Long,cleaningJobScheduleID:Long,startTime:String = "2017-08-13 00:00:00", endTime:String = "2363-01-01 00:00:00") : Long = {
+    NamedDB("mimir_community_server") autoCommit  { implicit session =>
+       sql"INSERT INTO SCHEDULE_USERS ( USER_ID, SCHEDULE_CLEANING_JOBS_ID, START_TIME, END_TIME ) VALUES ( ${userID},${cleaningJobScheduleID},${startTime},${endTime} )" // don't worry, prevents SQL injection
+        .updateAndReturnGeneratedKey 
+        .apply() 
+     }
+  }
+  
+  def assignAllCleaningJobToUser(userID:Long, startTime:String = "2017-08-13 00:00:00", endTime:String = "2363-01-01 00:00:00") : Seq[Long] = {
+    (NamedDB("mimir_community_server") autoCommit  { implicit session =>
+       sql"SELECT SCHEDULE_CLEANING_JOBS_ID FROM SCHEDULE_CLEANING_JOBS" // don't worry, prevents SQL injection
+       .map(rs => rs.long("SCHEDULE_CLEANING_JOBS_ID")) 
+       .list
+       .apply() 
+     }).map(schedID => assignCleaningJobToUser(userID,schedID,startTime,endTime))
+  }
+  
   private def containRepair(repair:mimir.ctables.Repair) : CleaningJobRepairContainer = {
     repair match {
       case mimir.ctables.RepairFromList(_) => CleaningJobTaskRepair.containRepair("RepairFromList", upickle.read[CleaningJobTaskRepairFromList](repair.toJSON))
@@ -346,12 +390,12 @@ object SharedServlet {
     }
   }
   
-  def getCleaningJobTaskList(deviceID:String, cleaningJobID:String, count:Int, offset:Int) : List[CleaningJobTaskGroup] = {
+  def getCleaningJobTaskList(deviceID:String, cleaningJobID:String, operator:String, count:Int, offset:Int) : List[CleaningJobTaskGroup] = {
     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
     val reasonSeqList = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select cjd.*, cj.TYPE from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj on cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID WHERE cj.CLEANING_JOB_ID = $cleaningJobID" // don't worry, prevents SQL injection
           .map(rs => {
-            MimirCommunityServer.explainEverything(assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))).map(reasonSet => {
+            MimirCommunityServer.explainEverything(Json.toOperator(Json.parse(operator))/*assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))*/).map(reasonSet => {
                reasonSet.take(MimirVizier.db, count, offset).map(reason => { 
                  val containedRepair = containRepair(reason.repair)
                  CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containedRepair, reason.args.map( _.toString).toList )))
@@ -363,7 +407,24 @@ object SharedServlet {
         reasonSeqList.flatten
    }
   
-  def getCleaningJobTaskFocusedList(deviceID:String, cleaningJobID:String, rows:Seq[String], cols:Seq[String]) : List[CleaningJobTaskGroup] = {
+   def getCleaningJobTaskListSchema(deviceID:String, cleaningJobID:String, operator:String, cols:Seq[String]) : List[CleaningJobTaskGroup] = {
+     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
+     val reasonSeqList = NamedDB("mimir_community_server") autoCommit { implicit session =>
+         sql"select cjd.*, cj.TYPE from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj on cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID WHERE cj.CLEANING_JOB_ID = $cleaningJobID" // don't worry, prevents SQL injection
+          .map(rs => {
+            //get all schema level reasons and put each in a seperate group
+            val oper = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+            MimirCommunityServer.explainSchema(oper, cols).map(reasonSet => {
+             reasonSet.all(MimirVizier.db).map(reason => { 
+               CleaningJobTaskGroup(List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )))
+             })}).flatten.toList 
+          }).list.apply()
+        }
+     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
+     reasonSeqList.flatten
+   }
+   
+  def getCleaningJobTaskFocusedList(deviceID:String, cleaningJobID:String, operator:String, rows:Seq[String], cols:Seq[String]) : List[CleaningJobTaskGroup] = {
     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
     val reasonSeqList = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select cjd.*, cj.TYPE from CLEANING_JOB_DATA cjd join CLEANING_JOBS cj on cj.CLEANING_JOB_ID = cjd.CLEANING_JOB_ID WHERE cj.CLEANING_JOB_ID = $cleaningJobID" // don't worry, prevents SQL injection
@@ -371,16 +432,18 @@ object SharedServlet {
             rs.string("TYPE") match {
               case "GIS" => {
                 //for gis we want to group the lat and lon repairs so the can be repaired in one go, so the cols here should be the lat and lon cols
-                rows.map(row => CleaningJobTaskGroup(MimirCommunityServer.explainSubset(assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID")), Seq(row), cols).map(reasonSet => {
+                val oper = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+                rows.map(row => CleaningJobTaskGroup(MimirCommunityServer.explainSubsetWithoutSchema(oper, Seq(row), cols).map(reasonSet => {
                  reasonSet.all(MimirVizier.db).map(reason => { 
                    //upickle.read[CleaningJobTask](reason.toJSON)
                    CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )
                  })
                }).flatten.toList))
               }
-              case "DATA" => {
+              case "DATA" | "INTERACTIVE" => {
                 //for this, each reason becomes it's own task group
-                MimirCommunityServer.explainSubset(assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID")), rows, cols).map(reasonSet => {
+                val oper = Json.toOperator(Json.parse(operator))
+                MimirCommunityServer.explainSubsetWithoutSchema(oper/*assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))*/, rows, cols).map(reasonSet => {
                  reasonSet.all(MimirVizier.db).map(reason => { 
                    //CleaningJobTaskGroup( List(upickle.read[CleaningJobTask](reason.toJSON)))
                    CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )))
@@ -442,22 +505,56 @@ object SharedServlet {
         }).flatten
   }
   
-  def getCleaningJobData(deviceID:String, cleaningJobID:String, count:Option[Int], offset:Option[Int]) : Vector[CleaningJobData] = {
+  def getCleaningJobData(deviceID:String, cleaningJobID:String, operStack:Seq[String], count:Option[Int], offset:Option[Int]) : Vector[CleaningJobData] = {
     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
     val cleaningJobData = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
-             val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+             val query = operStack match {
+               case Seq() => assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
+               case _ => Json.toOperator(Json.parse(operStack.last))
+             }
              val oper = count match {
                case Some(limit) => query.limit(limit, offset.getOrElse(0))
                case None => query
              }
+             val newQueryStack = operStack match {
+               case Seq() => Seq(Json.ofOperator(query).toString)
+               case x => x
+             }
              val queryRes = MimirCommunityServer.queryMimir(oper)
-             CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), queryRes._1, queryRes._2)
+             CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), newQueryStack, queryRes._1, queryRes._2)
           }).list.apply()
         }
     mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
         cleaningJobData.toVector
+  }
+  
+  def getCleaningJobDataRollUp(deviceID:String, cleaningJobID:String, operator:Seq[String], filters:Seq[SliceDiceFilter], groupBy:Set[String], aggrs:Seq[SliceDiceAggr]): Vector[CleaningJobData] = {
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier(deviceID, getUserName(deviceID)))
+    val cleaningJobData = NamedDB("mimir_community_server") autoCommit { implicit session =>
+         sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
+           .map(rs => {
+             val query = Json.toOperator(Json.parse(operator.last))
+             val sliceQuery = filters match {
+               case Seq() => query
+               case x => x.foldLeft(query)((oper,filter) => {
+                 oper.filter(mimir.parser.ExpressionParser.expr(s"${filter.col} ${filter.op} ${filter.value}"))
+               })
+             }
+             val rollupQuery = (groupBy.toSeq, aggrs) match {
+               case (Seq(), Seq()) => sliceQuery
+               case (Seq(), _) => Aggregate(Seq(), aggrs.map(aggr => AggFunction(aggr.op,false,Seq(Var(aggr.col)),s"${aggr.op}_${aggr.col}")), sliceQuery)
+               case (gbs, Seq()) => Aggregate(gbs.map(Var(_)), Seq(), sliceQuery)
+               case (gbs, _) => Aggregate(gbs.map(Var(_)), aggrs.map(aggr => AggFunction(aggr.op,false,Seq(Var(aggr.col)),s"${aggr.op}_${aggr.col}")), sliceQuery) 
+             }
+             val oper = rollupQuery.limit(5, 0)
+             val queryRes = MimirCommunityServer.queryMimir(oper)
+             CleaningJobData(rs.int("CLEANING_JOB_DATA_ID"), rs.int("CLEANING_JOB_ID"), operator :+ Json.ofOperator(rollupQuery).toString, queryRes._1, queryRes._2)
+          }).list.apply()
+        }
+    mimir.models.FeedbackSource.setSource(FeedbackSourceIdentifier())
+    cleaningJobData.toVector
   }
   
   def getCleaningJobDataOperator(deviceID:String, cleaningJobID:String, count:Option[Int], offset:Option[Int]) : Vector[String] = {
@@ -506,7 +603,7 @@ object SharedServlet {
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
              val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-             val oper = query.count(false, "COUNT")
+             val oper = query.count(false)
              val queryRes = MimirCommunityServer.queryMimir(oper)
              queryRes._2.head.data.head.data.toInt
           }).single.apply()
@@ -553,7 +650,7 @@ object SharedServlet {
             .list 
             .apply() 
           }
-          val oper = MimirVizier.parseQuery(rs.string("QUERY"))
+          val oper = Json.toOperator(Json.parse(rs.string("QUERY")))
           userCleaningJobSettings.foldLeft(oper)((init, setting) => {
             setting match {
               case CleaningJobFilterSetting(_, _, queryWhere) => oper.filter(ExpressionParser.expr(queryWhere)) 
@@ -857,6 +954,7 @@ object MimirCommunityServer {
   def explainSubset(oper:Operator, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
     val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
       def run() = {
+        println(s"explainSubset ----------:\noper:$oper\nrows:$rows\ncols:$cols\n----------------------")
         returnedValue = Some(MimirVizier.explainSubset(oper, rows, cols))
       }
     })
@@ -870,6 +968,54 @@ object MimirCommunityServer {
     val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
       def run() = {
         returnedValue = Some(MimirVizier.explainSubset(query, rows, cols))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
+  def explainSubsetWithoutSchema(query:String, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainSubsetWithoutSchema(query, rows, cols))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
+  def explainSubsetWithoutSchema(query:Operator, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainSubsetWithoutSchema(query, rows, cols))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
+  def explainSchema(query:String, cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainSchema(query, cols))
+      }
+    })
+    reasons match {
+      case None => Seq()
+      case Some(ret:Seq[mimir.ctables.ReasonSet]) => ret
+    }
+  }
+  
+  def explainSchema(query:Operator, cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
+    val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
+      def run() = {
+        returnedValue = Some(MimirVizier.explainSchema(query, cols))
       }
     })
     reasons match {
@@ -893,7 +1039,10 @@ object MimirCommunityServer {
       if(!args.isEmpty){
         " (" + args.mkString(",") + ")"
       } else { "" }
-    MimirVizier.db.update(MimirVizier.db.parse(s"FEEDBACK ${model} ${idx}$argString IS ${ repairValue }").head)
+    val feedbackStr = s"FEEDBACK ${model} ${idx}$argString IS ${ repairValue }"
+    println(feedbackStr)
+    MimirVizier.db.update(MimirVizier.db.parse(feedbackStr).head)
+    println(s"feedback given by: ${mimir.models.FeedbackSource.feedbackSource}")
   }
   
   def setLocationMimir( lat:Double, lon:Double): Unit = {
@@ -1014,7 +1163,7 @@ object MimirCommunityServer {
           runnable.run()
           returnQueue.put( runnable.getReturnedValue )
         } catch {
-          case t: Throwable => println("MimirThread: take interrupted...")
+          case t: Throwable => println("MimirThread: take interrupted: " + t.toString())
         }
         
       }

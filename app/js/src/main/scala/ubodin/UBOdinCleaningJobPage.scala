@@ -30,6 +30,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
   import RCustomStyles._
   import Mui.SvgIcons.{ ActionInfo, AlertWarning, ActionInfoOutline, AlertError, AlertErrorOutline, ActionCheckCircle, ContentAdd, NavigationClose }
   import MuiAutoCompleteFilters.caseInsensitiveFilter
+  import Mui.Styles.colors
   
   val deviceFingerprint = Client.deviceFingerprint;
   var cleaningJobID = "0"
@@ -85,19 +86,27 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       ^.display := "flex" ,
       ^.flexWrap := "wrap" ,
       ^.flexGrow := "1",
-      ^.margin := "30px" )
+      ^.margin := "10px" )
       
     val sliceDiceInnerSection = Seq(
-      ^.display := "inline-block" ,
-      ^.margin := "30px" )
+      ^.display := "inline-flex" ,
+      ^.margin := "10px",
+      ^.verticalAlign := "top",
+      ^.borderRight := "1px solid rgb(219, 219, 219)" )
       
     val sliceDiceFilterSection = Seq(
       ^.display := "block" ,
-      ^.margin := "30px" )
+      ^.margin := "5px",
+      ^.alignItems := "stretch",
+      ^.height := "inherit" )
       
     val sliceDiceFilterRow = Seq(
       ^.display := "block" ,
       ^.margin := "5px" )
+      
+    val ilb = Seq(
+      ^.display := "inline-block",
+      ^.margin := "2px" )
       
     val taskSection = Seq(
       MsFlexWrap := "wrap" ,
@@ -139,16 +148,18 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                    snackState:SnackState = SnackState(false,"",""),
                    taskTreeState:TaskTreeState = TaskTreeState(false, None),
                    taskListState:TaskListState = TaskListState(false, List()),
-                   dataTableState:DataTableState = DataTableState(false, CleaningJobData(0,0,Vector(),Vector()), List(), 0, 5),//List(), Vector(), List()),
+                   taskListSchemaState:TaskListState = TaskListState(false, List()),
+                   taskListTabsState:TaskListTabsState = TaskListTabsState(1),
+                   dataTableState:DataTableState = DataTableState(false, CleaningJobData(0,0,Seq(),Vector(),Vector()), List(), 0, 5),//List(), Vector(), List()),
                    dataTableViewState:DataTableViewState = DataTableViewState(0,Vector()),
                    repairValues:Seq[String] = Seq(),
                    selectedRow:Option[CleaningJobDataRow] = None,
                    selectedCol:Option[String] = None,
                    selectedTask:Option[CleaningJobTaskGroup] = None,
                    drawerState:DrawerState = DrawerState(Seq(), Seq(), None, false, true, false),
-                   mapState:MapState = MapState( LatLng(42.8864 ,-78.8784), List() , 14, true),
+                   mapState:MapState = MapState( LatLng(42.8864, -78.8784), List() , 14, true),
                    addressState:AddressState = AddressState("","","",""),
-                   sliceDiceState:SliceDiceState = SliceDiceState(Set(),Seq(),Seq(),Seq("AVG","SUM","COUNT","FIRST"),Seq()),
+                   sliceDiceState:SliceDiceState = SliceDiceState(Set(),Seq(),Seq()),
                    baseTheme: MuiRawTheme = Mui.Styles.LightRawTheme,
                    backgroundColor: js.UndefOr[MuiColor] = js.undefined
                    ){
@@ -175,7 +186,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
   case class DrawerState(choices:Seq[MainMenuChoice], selected:Seq[String], selectedWaitingCallback:Option[MainMenuChoice] = None, open:Boolean, docked:Boolean, right:Boolean)
   case class MapState(center:LatLng, markers: List[Marker], zoom:Int, cluster:Boolean)  
   case class AddressState(houseNumber:String, streetName:String, city:String, state:String)
-  case class SliceDiceState(rollUpGB:Set[String],gbCols:Seq[String],rollUpAggrs:Seq[SliceDiceAggr],aggrs:Seq[String],filters:Seq[SliceDiceFilter]){
+  case class SliceDiceState(rollUpGB:Set[String],gbCols:Seq[String],rollUpAggrs:Seq[SliceDiceAggr],aggrs:Seq[String]=Seq("AVG","SUM","COUNT","FIRST"),filters:Seq[SliceDiceFilter]=Seq()){
     def rollUpGBTouched(us: js.UndefOr[String]) = us.fold(this){
       case s if rollUpGB contains s =>
         copy(rollUpGB = rollUpGB - s)
@@ -184,9 +195,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
     }
   }
   case class CleaningJobTypeState(name:String)
-  
-  case class SliceDiceFilter(id:String,col:String,op:String,value:String)
-  case class SliceDiceAggr(id:String,col:String,op:String)
+  case class TaskListTabsState(tab:Int)
   
   case class MainMenuChoice(id: String, text: String, settingOption:Option[SettingOption])
     
@@ -242,13 +251,14 @@ object UBOdinCleaningJobPage extends NetworkInterface {
         getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >>
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
         cleaningJobDataCountResponse(cleaningJobLoadResponse.dataCount, t) >>
-        cleaningJobDataResponse(cleaningJobLoadResponse.data, t))
+        cleaningJobDataResponse(cleaningJobLoadResponse.data, t) >>
+        cleaningJobTaskListSchemaResponse(cleaningJobLoadResponse.taskListSchema, t))
       })
     }
     
-    def requestCleaningJobTaskList(cleaningJobID:String, count:Int, offset:Int) : Callback = {
+    def requestCleaningJobTaskList(cleaningJobID:String, operator:String, count:Int, offset:Int) : Callback = {
       val url = "/ajax/CleaningJobTaskListRequest"
-      val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, count, offset))
+      val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, operator, count, offset))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
@@ -256,9 +266,9 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       })
     }
     
-    def requestCleaningJobTaskFocusedList(cleaningJobID:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
+    def requestCleaningJobTaskFocusedList(cleaningJobID:String, operator:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
       val url = "/ajax/CleaningJobTaskFocusedListRequest"
-      val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, rowIDs, cols))
+      val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, operator, rowIDs, cols))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
@@ -266,6 +276,15 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       })
     }
     
+    def requestCleaningJobTaskListSchema(cleaningJobID:String, operator:String, cols:Seq[String] = Seq()) : Callback = {
+      val url = "/ajax/CleaningJobTaskListSchemaRequest"
+      val data = upickle.write(CleaningJobTaskListSchemaRequest(deviceFingerprint,cleaningJobID, operator, cols))
+      network.ajaxRequest(url, data, responseText => {
+        val cleaningJobTaskListSchemaRespons = upickle.read[CleaningJobTaskListResponse](responseText)
+        cleaningJobTaskListSchemaResponse(cleaningJobTaskListSchemaRespons, t)
+        //cleaningJobTaskTreeResponse(xhr.responseText, t) 
+      })
+    }
 
     def cleaningJobTaskTreeResponse(cleaningJobTaskListResponse: CleaningJobTaskListResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
       println("cleaningJobTaskTreeResponse: " )
@@ -282,9 +301,24 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       t.modState(s => s.copy(taskListState = TaskListState(true, newListData)))
     }
     
-    def requestCleaningData(cleaningJobID:String, offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
+    def cleaningJobTaskListSchemaResponse(cleaningJobTaskListSchemaResponse: CleaningJobTaskListResponse, scope: BackendScope[RouterCtl[Page], State]): Callback = {
+      println("cleaningJobTaskListSchemaResponse: " )
+      val newListData = cleaningJobTaskListSchemaResponse.cleaningJobTasks.toList
+      t.modState(s => s.copy(taskListSchemaState = TaskListState(true, newListData)))
+    }
+    
+    def requestCleaningData(cleaningJobID:String, operatorStack:Seq[String], offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
       val url = "/ajax/CleaningJobDataRequest"
-      val data = upickle.write(CleaningJobDataRequest(deviceFingerprint,cleaningJobID, count, offset))
+      val data = upickle.write(CleaningJobDataRequest(deviceFingerprint,cleaningJobID, operatorStack, count, offset))
+      network.ajaxRequest(url, data, responseText => {
+        val cleaningJobDataRespons = upickle.read[CleaningJobDataResponse](responseText)
+        cleaningJobDataResponse(cleaningJobDataRespons, t)
+      })
+    }
+    
+    def requestCleaningDataRollUp(cleaningJobID:String, operator:Seq[String], filters:Seq[SliceDiceFilter], groupBy:Set[String], aggrs:Seq[SliceDiceAggr]) : Callback = {
+      val url = "/ajax/RollUpCleaningJobDataRequest"
+      val data = upickle.write(RollUpCleaningJobDataRequest(deviceFingerprint, cleaningJobID, operator, filters, groupBy, aggrs))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobDataRespons = upickle.read[CleaningJobDataResponse](responseText)
         cleaningJobDataResponse(cleaningJobDataRespons, t)
@@ -403,7 +437,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           val data = upickle.write(CleaningJobRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
           network.ajaxRequest(url, data, responseText => {
             val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
-            t.state.flatMap(s => requestCleaningData(cleaningJobID, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
+            t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
           })
         }
       })
@@ -412,15 +446,51 @@ object UBOdinCleaningJobPage extends NetworkInterface {
     ///----------------------------------------
     ///-------Table with uncertainty code
     ///----------------------------------------
+    def mapTableCellToTask(col:String, tableRow:ODInTable.Model, state:State) : Option[CleaningJobTaskGroup] = {
+      state.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+             Some(state.taskListState.data(state.dataTableViewState.rows.indexOf(tableRow)))
+          }
+          case CleaningJobTypeState("DATA") | CleaningJobTypeState("INTERACTIVE") => {   
+            val colIdx = state.dataTableState.data.cols.indexOf(col)
+            val rowIdx = state.dataTableViewState.rows.indexOf(tableRow)
+            val colCount = state.dataTableState.data.cols.length
+            val targetCellIdx = (colCount*rowIdx)+colIdx
+            Some(state.taskListState.data(state.dataTableViewState.rows.zipWithIndex.foldLeft(-1)((init, row) => {
+              row._1.data.zipWithIndex.foldLeft(init)((initRow, cell) => {
+                println(s"cell: ${cell._1} isDet: ${cell._1.isDet} total: $initRow")
+                if(cell._1.isDet || (((colCount*row._2)+cell._2)>targetCellIdx)) initRow else initRow+1
+            })})))
+          }
+      }
+    }
+    
     def onTableCellClick(col:String, desc: String, tableRow:ODInTable.Model): Callback = {
-      t.modState(s => { 
-        val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
-        val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
-        val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
-        val state = "NY"
-        s.copy(selectedCol = Some(col), selectedRow = Some(tableRow), selectedTask = Some(s.taskListState.data(s.dataTableViewState.rows.indexOf(tableRow))), addressState = AddressState(houseNumber, streetName, city, state)) 
-      }, t.state.flatMap( s => {
-        UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog)
+      t.modState(s => s.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+            val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+            val state = "NY"
+            s.copy(selectedCol = Some(col), selectedRow = Some(tableRow), selectedTask = mapTableCellToTask(col, tableRow, s), addressState = AddressState(houseNumber, streetName, city, state)) 
+          }
+          case CleaningJobTypeState("DATA") => {   
+            s.copy(selectedCol = Some(col), selectedRow = Some(tableRow), selectedTask = mapTableCellToTask(col, tableRow, s))
+          }
+          case CleaningJobTypeState("INTERACTIVE") => {  
+            s.copy(selectedCol = Some(col), selectedRow = Some(tableRow), selectedTask = mapTableCellToTask(col, tableRow, s)) 
+          }
+        }, t.state.flatMap( s => s.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+            UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog) 
+          }
+          case CleaningJobTypeState("DATA") => {   
+            openRepairDialog(Seq(s.selectedCol.get))
+          }
+          case CleaningJobTypeState("INTERACTIVE") => {  
+             openRepairDialog(Seq(s.selectedCol.get))
+          }
+        
       }))
   }
     
@@ -462,42 +532,50 @@ object UBOdinCleaningJobPage extends NetworkInterface {
               s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows)) 
             }
           }, 
-          requestCleaningJobTaskFocusedList(cleaningJobID, tableRows.flatMap(row => { 
+          t.state.flatMap(s => requestCleaningJobTaskFocusedList(cleaningJobID, s.dataTableState.data.operator.head, tableRows.flatMap(row => { 
             row match {
               case CleaningJobDataRow(_, _, prov) => Some(prov)
               case _ => None
             }
-      })))
+      }))))
     }
       
     val afterNextPage: (Int, Int) => Callback = {
       (offset, rows) => {
         println(s"nextPage: offset: $offset count: $rows")
-        requestCleaningData(cleaningJobID, Some(offset), Some(rows))
+        t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(offset), Some(rows)))
       }
     }
     
     val afterPrevPage: (Int, Int) => Callback = {
       (offset, rows) => {
         println(s"prevPage: offset: $offset count: $rows")
-        requestCleaningData(cleaningJobID, Some(offset), Some(rows))
+        t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(offset), Some(rows)))
       }
     }
     
     val onTableRowSelect: ODInTable.Model => Callback = {
       tableRow => 
-        t.modState(s => {
-          val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
-          val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
-          val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
-          val state = "NY"
-          val rowIDs = s.dataTableViewState.rows.map(_.prov)
-          s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
+        t.modState(s => s.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+            val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+            val state = "NY"
+            val rowIDs = s.dataTableViewState.rows.map(_.prov)
+            s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state)) 
+          }
+          case CleaningJobTypeState("DATA") => {   
+            s.copy(selectedRow = Some(tableRow))
+          }
+          case CleaningJobTypeState("INTERACTIVE") => {  
+            s.copy(selectedRow = Some(tableRow)) 
+          }
         })
     }
     
     val loadTableData: (ReactMouseEvent, Boolean) => Callback = {
-      (event, toggled) => t.state.flatMap(s => requestCleaningData(cleaningJobID, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
+      (event, toggled) => t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
     }
 
     ///----------------------------------------
@@ -515,15 +593,35 @@ object UBOdinCleaningJobPage extends NetworkInterface {
        e => Callback.info("muiTaskListTouchEvent")
        
     val muiTaskListTouchTapEvent: CleaningJobTaskGroup => TouchTapEvent => Callback = 
-       reasons => e => t.modState(s => {
-           val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
-           val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
-           val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" 
-           val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
-           val state = "NY"
-           val rowIDs = s.dataTableViewState.rows.map(_.prov)
-           s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
-         }, t.state.flatMap(s => UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog)))
+       reasons => e => t.modState(s => s.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+            val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
+            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" 
+            val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
+            val state = "NY"
+            val rowIDs = s.dataTableViewState.rows.map(_.prov)
+            s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
+          }
+          case CleaningJobTypeState("DATA") => {   
+            val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
+            s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow))
+          }
+          case CleaningJobTypeState("INTERACTIVE") => {  
+            val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
+            s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow)) 
+          } 
+        }, t.state.flatMap(s => s.cleaningJobTypeState match { 
+          case CleaningJobTypeState("GIS") => { 
+            UBOdinGoogleMap.geocodeAddress(s.addressState.houseNumber, s.addressState.streetName, s.addressState.city, s.addressState.state, openGeoResDialog)
+          }
+          case CleaningJobTypeState("DATA") => {   
+            openRepairDialog(Seq(s.selectedCol.get))
+          }
+          case CleaningJobTypeState("INTERACTIVE") => {  
+            openRepairDialog(Seq(s.selectedCol.get))
+          }
+        }))
        
     val muiTaskListAnyEvent: scala.scalajs.js.Any => Callback = 
        e => Callback.info("muiTaskListAnyEvent")  
@@ -540,6 +638,25 @@ object UBOdinCleaningJobPage extends NetworkInterface {
         case Some(initElement) => Some(<.div(initElement,<.br(),element))
       }).get
     }
+     
+       
+    ///----------------------------------------
+    /// MUI Task List Code
+    ///----------------------------------------
+    val muiTaskListSchemaTouchEvent: ReactTouchEvent => Callback = 
+       e => Callback.info("muiTaskListSchemaTouchEvent")
+       
+    val muiTaskListSchemaTouchTapEvent: CleaningJobTaskGroup => TouchTapEvent => Callback = 
+       reasons => e => t.modState(s => s.copy(selectedTask = Some(reasons)), 
+           t.state.flatMap(s => openSchemaRepairDialog()))
+     
+
+    ///----------------------------------------
+    ///--------Task List Tabs Code
+    ///----------------------------------------
+    val onTaskListTabChange: (Int, ReactEventH, ReactElement) => Callback =
+    (chosen, _, _) ⇒ t.modState(s => s.copy(taskListTabsState = s.taskListTabsState.copy(tab = chosen))) >> Callback.info(s"chosen task list tab $chosen")
+    
        
     ///----------------------------------------
     ///--------Task Tree code
@@ -761,6 +878,90 @@ object UBOdinCleaningJobPage extends NetworkInterface {
         }) 
     }
       
+    def handleDialogManualRepairEntry: Seq[String] => TouchTapEvent => Callback =
+      repairColVals => e => t.modState(s => s.copy(repairValues = Seq())) >> togglePopover("", "", 
+        Some(<.div(
+            ^.padding := "20px",
+            <.h2("Repair Manually"),
+            <.p("Please Enter The Correct Value:"),
+            repairColVals.zipWithIndex.map(colVal => {
+              MuiTextField( hintText = colVal._1:ReactNode, floatingLabelText = s"Enter ${colVal._1} Here":ReactNode, onChange = updateManualRepairValues(colVal._2))()
+            }),
+            MuiFlatButton(key = "1", label = "Cancel", secondary = true, onTouchTap = popoverClose)(),
+            MuiFlatButton(key = "2", label = "Repair", secondary = true, onTouchTap = handleDialogManualRepair)()
+        ))
+      )
+    
+    val updateManualRepairValues : Int => (ReactEvent, String) => Callback = 
+      idx => (e, value) => t.modState(s => s.copy(repairValues = {
+        println(s"update repair value: $idx -> $value")
+        if(s.repairValues.length > idx) s.repairValues.zipWithIndex.map( idxEl => { if(idxEl._2 == idx) value else idxEl._1 })
+        else s.repairValues.union(for(i <- s.repairValues.length-1 to idx) yield { if(i == idx) value else "" })
+      }))
+   
+    def handleDialogManualRepair:  TouchTapEvent => Callback = 
+      e => popoverClose(e) >> t.state.map(s => (s.selectedRow, s.selectedTask, s.repairValues)).flatMap( stateSubset => handleDialogRepairGeneral(stateSubset._2.get, stateSubset._1.get, stateSubset._3)(e))
+    
+    def handleDialogRepairGeneral: (CleaningJobTaskGroup, ODInTable.Model, Seq[String]) => TouchTapEvent => Callback =
+      (reasons, row, values) => e => requestRepair(cleaningJobID, reasons, row, values) >> t.modState(s => s.copy(dialogState = DialogState(!s.dialogState.open, s.dialogState.title, s.dialogState.message, None, None))) >> showSnack("Repaired", "The data has been repaired")//Callback.info("Submit Clicked")  
+      
+      
+    def openRepairDialog(cols:Seq[String]): Callback = {
+      t.state.flatMap( s =>
+        {
+          val tableRowOp = s.selectedRow
+          val selectedTask = s.selectedTask.get
+          tableRowOp match { 
+            case Some(tableRow) => {
+              val uncertainValues = cols.map(col => (col, tableRow.data(s.dataTableState.data.cols.indexOf(col)).data ))
+              val stateDialogActions: ReactNode = js.Array(
+                MuiFlatButton(key = "1", label = "Cancel", secondary = true, onTouchTap = handleDialogCancel)(),
+                MuiFlatButton(key = "2", label = "Repair Manually", secondary = true, onTouchTap = handleDialogManualRepairEntry(cols))()
+              )  
+              val content = <.div(
+                <.h3("Repair Dialog"),
+                <.div()(
+                  <.div(^.display := "inline-block", ^.margin := "40px", ^.maxWidth := "40%", ^.verticalAlign := "top")(
+                      <.h4("Uncertain Value: "),
+                      <.div( s"${uncertainValues.mkString(",")}"),
+                      MuiFlatButton(key = "3", label = "Acknowledge Current", secondary = true, onTouchTap = handleDialogRepairGeneral(selectedTask, tableRow, uncertainValues.unzip._2))()
+                  ))
+                )
+              t.modState(s => s.copy(dialogState = DialogState(true, "", "", Some(content), Some(stateDialogActions)))) >> Callback.info("Opened")
+            }
+            case None => Callback.info("No Row Selected not opening dialog")
+          }
+        }) 
+    }
+     
+    def openSchemaRepairDialog(): Callback = {
+      t.state.flatMap( s =>
+        {
+          val selectedTask = s.selectedTask
+          selectedTask match { 
+            case Some(tasks) => {
+              val uncertainValues = tasks.tasks.map(task => (task.english, ""))
+              val stateDialogActions: ReactNode = js.Array(
+                MuiFlatButton(key = "1", label = "Cancel", secondary = true, onTouchTap = handleDialogCancel)(),
+                MuiFlatButton(key = "2", label = "Repair Manually", secondary = true, onTouchTap = handleDialogManualRepairEntry(Seq()))()
+              )  
+              val content = <.div(
+                <.h3("Repair Dialog"),
+                <.div()(
+                  <.div(^.display := "inline-block", ^.margin := "40px", ^.maxWidth := "40%", ^.verticalAlign := "top")(
+                      <.h4("Uncertain Value: "),
+                      <.div( s"${uncertainValues.mkString(",")}"),
+                      MuiFlatButton(key = "3", label = "Acknowledge Current", secondary = true, onTouchTap = handleDialogRepairGeneral(tasks, null, uncertainValues.unzip._2))()
+                  ))
+                )
+              t.modState(s => s.copy(dialogState = DialogState(true, "", "", Some(content), Some(stateDialogActions)))) >> Callback.info("Opened")
+            }
+            case None => Callback.info("No Row Selected not opening dialog")
+          }
+        }) 
+    }
+      
+      
     ///----------------------------------------
     ///--------SnackBar code
     ///----------------------------------------
@@ -798,18 +999,18 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       (e, elem) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.rollUpGBTouched(elem.props.value)))
     
     val onSliceDiceAggrColChange: SliceDiceAggr => (TouchTapEvent, Int, String) => Callback =
-      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(cfilter => {
-        cfilter.id match {
-          case filter.id => filter.copy(col = a)
-          case _ => cfilter
+      aggr => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(caggr => {
+        caggr.id match {
+          case aggr.id => aggr.copy(col = a)
+          case _ => caggr
         }
       }))))
       
     val onSliceDiceAggrOpChange: SliceDiceAggr => (TouchTapEvent, Int, String) => Callback =
-      filter => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(cfilter => {
-        cfilter.id match {
-          case filter.id => filter.copy(op = a)
-          case _ => cfilter
+      aggr => (e, idx, a) => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(rollUpAggrs = s.sliceDiceState.rollUpAggrs.map(caggr => {
+        caggr.id match {
+          case aggr.id => aggr.copy(op = a)
+          case _ => caggr
         }
       }))))
       
@@ -844,10 +1045,17 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       }))))
       
     val onFilterAddTouch: TouchTapEvent => Callback =
-      e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = (s.sliceDiceState.filters :+ new SliceDiceFilter(s.sliceDiceState.filters.length.toString(), s.sliceDiceState.gbCols.head, "=",""))))) >> Callback.info("Filter Added")
+      e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = (s.sliceDiceState.filters :+ new SliceDiceFilter(s.sliceDiceState.filters.length.toString(), s.sliceDiceState.gbCols.head, "=",""))))) 
     
     val onFilterRemoveTouch: SliceDiceFilter => TouchTapEvent => Callback =
       filter => e => t.modState(s => s.copy(sliceDiceState = s.sliceDiceState.copy(filters = s.sliceDiceState.filters.filterNot(_.equals(filter)) )))
+      
+    val onRollupApplyTouch: (SliceDiceState, Seq[String]) => TouchTapEvent => Callback =
+      (sds, oper) => e => t.modState(s => s.copy(sliceDiceState = SliceDiceState(Set(),Seq(),Seq(),Seq("AVG","SUM","COUNT","FIRST"),Seq())), requestCleaningDataRollUp(cleaningJobID, oper, sds.filters, sds.rollUpGB, sds.rollUpAggrs) )
+    
+    val onDrillOutTouch: (SliceDiceState, Seq[String]) => TouchTapEvent => Callback =
+      (sds, oper) => e => t.modState(s => s.copy(sliceDiceState = SliceDiceState(Set(),Seq(),Seq(),Seq("AVG","SUM","COUNT","FIRST"),Seq())), requestCleaningData(cleaningJobID, oper.reverse.tail.reverse, Some(0), Some(5)) )
+      
       
     //render  
     def render(P: RouterCtl[Page], S: State) = {
@@ -905,20 +1113,41 @@ object UBOdinCleaningJobPage extends NetworkInterface {
             )
           ),
           UBOdinMobileTearSheet(
-            MuiList(key = "task_list")(
-                S.taskListState.data.zipWithIndex.map(listElement => {
-                  MuiListItem(
-                      key = s"item${listElement._2}", 
-                      primaryText = toElement(listElement._1),
-                      leftIcon           = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
-                      //rightIcon          = AlertWarning()(),
-                      //onKeyboardFocus    = muiTaskListFocusEvent,
-                      //onMouseLeave       = muiTaskListEvent,
-                      //onMouseEnter       = muiTaskListEvent,
-                      //onNestedListToggle = muiTaskListAnyEvent,
-                      //onTouchStart       = muiTaskListTouchEvent,
-                      onTouchTap         = muiTaskListTouchTapEvent(listElement._1))()
-                }) : _*
+            MuiTabs[Int](value = S.taskListTabsState.tab, onChange = onTaskListTabChange)(
+              MuiTab(label = <.span("Data Tasks ":ReactNode, MuiAvatar(key = "data_task_badge", size = 22, backgroundColor = colors.red400)(S.taskListState.data.length:ReactNode)):ReactNode, value = 1)(
+                MuiList(key = "task_list")(
+                    S.taskListState.data.zipWithIndex.map(listElement => {
+                      MuiListItem(
+                          key = s"item${listElement._2}", 
+                          primaryText = toElement(listElement._1),
+                          leftIcon           = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
+                          //rightIcon          = AlertWarning()(),
+                          //onKeyboardFocus    = muiTaskListFocusEvent,
+                          //onMouseLeave       = muiTaskListEvent,
+                          //onMouseEnter       = muiTaskListEvent,
+                          //onNestedListToggle = muiTaskListAnyEvent,
+                          //onTouchStart       = muiTaskListTouchEvent,
+                          onTouchTap         = muiTaskListTouchTapEvent(listElement._1))()
+                    }) : _*
+                )
+              ),
+              MuiTab(label = <.span("Schema Tasks ":ReactNode, MuiAvatar(key = "data_task_schema_badge", size = 22, backgroundColor = colors.red400)(S.taskListSchemaState.data.length:ReactNode)):ReactNode, value = 2)(
+                MuiList(key = "task_list_schema")(
+                    S.taskListSchemaState.data.zipWithIndex.map(listElement => {
+                      MuiListItem(
+                          key = s"item${listElement._2}", 
+                          primaryText = toElement(listElement._1),
+                          leftIcon           = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
+                          //rightIcon          = AlertWarning()(),
+                          //onKeyboardFocus    = muiTaskListFocusEvent,
+                          //onMouseLeave       = muiTaskListEvent,
+                          //onMouseEnter       = muiTaskListEvent,
+                          //onNestedListToggle = muiTaskListAnyEvent,
+                          //onTouchStart       = muiTaskListTouchEvent,
+                          onTouchTap         = muiTaskListSchemaTouchTapEvent(listElement._1))()
+                    }) : _*
+                )  
+              )
             )
           )
           /*ReactListView(
@@ -973,55 +1202,65 @@ object UBOdinCleaningJobPage extends NetworkInterface {
             case CleaningJobTypeState("INTERACTIVE") => {   
               <.div(Style.cleaningSection)(
                   <.div(Style.sliceDiceSection)(
-                       MuiPaper(style = js.Dynamic.literal(width = "100%"))(
+                       MuiPaper(style = js.Dynamic.literal(display = "inline-flex", width = "100%"))(
                            <.div(Style.sliceDiceInnerSection)(
                               <.div(Style.sliceDiceFilterSection)( 
+                                  MuiToolbarTitle(style = js.Dynamic.literal(fontSize = "16px"), text = "Filters")(),
                                   S.sliceDiceState.filters.map( filter => {
                                    <.div(Style.sliceDiceFilterRow)( 
                                      MuiSelectField[String](
+                                        style = js.Dynamic.literal(width = 110),
                                         onChange = onSliceDiceFilterChange(filter),
                                         value    = filter.col)(
                                         S.sliceDiceState.gbCols.zipWithIndex.map(col => {
                                           MuiMenuItem[String](key = col._2.toString, value = col._1, primaryText = col._1:ReactNode)()
                                         }) ),
-                                     MuiSelectField[String](
+                                     <.div(Style.ilb)(MuiSelectField[String](
+                                        style = js.Dynamic.literal(width = 70),
                                         onChange = onSliceDiceFilterOpChange(filter),
-                                        value    = filter.col)(
-                                        Seq("=","<",">","<=",">=","<>").zipWithIndex.map(op => {
+                                        value    = filter.op)(
+                                        Seq("=","<",">","<=",">=","<>","IS","IS NOT").zipWithIndex.map(op => {
                                           MuiMenuItem[String](key = op._2.toString, value = op._1, primaryText = op._1:ReactNode)()
-                                        }) ),
-                                     MuiTextField(
-                                        hintText = "Hint Text":ReactNode,
-                                        onChange = onSliceDiceFilterTextChange(filter))(),
+                                        }) )),
+                                     <.div(Style.ilb)(MuiTextField(
+                                        style = js.Dynamic.literal(width = 90, height = 40),
+                                        hintText = "Value":ReactNode,
+                                        onChange = onSliceDiceFilterTextChange(filter))()),
                                      MuiIconButton(onTouchTap = onFilterRemoveTouch(filter))(NavigationClose()()))
                                      } ), 
                                   MuiIconButton(onTouchTap = onFilterAddTouch)(ContentAdd()())
                               )
                           ), 
                           <.div(Style.sliceDiceInnerSection)(
-                              MuiMenu[String](
-                                desktop        = true,
-                                width          = "25%",
-                                value          = S.sliceDiceState.rollUpGB.toJsArray,
-                                multiple       = true,
-                                onItemTouchTap = onTouchTapRollUpGB
-                              )(
-                                S.sliceDiceState.gbCols.map(col => MuiMenuItem(value = col  )(col))
-                              ) 
+                              <.div(Style.sliceDiceFilterSection)( 
+                                  MuiToolbarTitle(style = js.Dynamic.literal(fontSize = "16px"), text = "Group By")(),
+                                  MuiMenu[String](
+                                    desktop        = true,
+                                    width          = "150px",
+                                    value          = S.sliceDiceState.rollUpGB.toJsArray,
+                                    multiple       = true,
+                                    onItemTouchTap = onTouchTapRollUpGB
+                                  )(
+                                    S.sliceDiceState.gbCols.map(col => MuiMenuItem(value = col  )(col))
+                                  ) 
+                              )
                           ), 
                           <.div(Style.sliceDiceInnerSection)(
                               <.div(Style.sliceDiceFilterSection)( 
+                                  MuiToolbarTitle(style = js.Dynamic.literal(fontSize = "16px"), text = "Aggregates")(),
                                   S.sliceDiceState.rollUpAggrs.map( aggr => {
-                                   <.div(Style.sliceDiceFilterRow)( 
+                                    <.div(Style.sliceDiceFilterRow)( 
                                      MuiSelectField[String](
+                                        style = js.Dynamic.literal(width = 80),
                                         onChange = onSliceDiceAggrOpChange(aggr),
-                                        value    = aggr.col)(
+                                        value    = aggr.op)(
                                         S.sliceDiceState.aggrs.zipWithIndex.map(op => {
                                           MuiMenuItem[String](key = op._2.toString, value = op._1, primaryText = op._1:ReactNode)()
                                         }) ),
                                      MuiSelectField[String](
+                                        style = js.Dynamic.literal(width = 110),
                                         onChange = onSliceDiceAggrColChange(aggr),
-                                        value    = aggr.op)(
+                                        value    = aggr.col)(
                                         S.sliceDiceState.gbCols.zipWithIndex.map(col => {
                                           MuiMenuItem[String](key = col._2.toString, value = col._1, primaryText = col._1:ReactNode)()
                                         }) ),
@@ -1029,6 +1268,16 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                                      } ), 
                                   MuiIconButton(onTouchTap = onAggrAddTouch)(ContentAdd()())
                               )
+                          ),
+                          <.div(Style.sliceDiceFilterRow)(
+                              S.dataTableState.data.operator match {
+                                case Seq() => MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(margin = "5px"))()
+                                case Seq(oper:String) => MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(margin = "5px"))()
+                                case x => {
+                                  Seq(MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(display = "inline-block", margin = "5px"))(),
+                                  MuiRaisedButton(key = "applyDrillDown", label = "Go Back", onTouchTap = onDrillOutTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(display = "inline-block", margin = "5px"))())
+                                }
+                              }
                           )
                        )    
                   ),

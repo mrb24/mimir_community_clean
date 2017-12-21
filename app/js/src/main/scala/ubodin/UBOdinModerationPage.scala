@@ -146,9 +146,9 @@ object UBOdinModerationPage extends NetworkInterface {
       })
     }
     
-    def requestCleaningJobTaskList(cleaningJobID:String, count:Int, offset:Int) : Callback = {
+    def requestCleaningJobTaskList(cleaningJobID:String, operator:String, count:Int, offset:Int) : Callback = {
       val url = "/ajax/CleaningJobTaskListRequest"
-      val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, count, offset))
+      val data = upickle.write(CleaningJobTaskListRequest(deviceFingerprint, cleaningJobID, operator, count, offset))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)
@@ -156,9 +156,9 @@ object UBOdinModerationPage extends NetworkInterface {
       })
     }
     
-    def requestCleaningJobTaskFocusedList(cleaningJobID:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
+    def requestCleaningJobTaskFocusedList(cleaningJobID:String, operator:String, rowIDs:Seq[String], cols:Seq[String] = Seq()) : Callback = {
       val url = "/ajax/CleaningJobTaskFocusedListRequest"
-      val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, rowIDs, cols))
+      val data = upickle.write(CleaningJobTaskFocusedListRequest(deviceFingerprint,cleaningJobID, operator, rowIDs, cols))
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobTaskListRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListResponse(cleaningJobTaskListRespons, t)

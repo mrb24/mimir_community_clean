@@ -11,6 +11,7 @@ object UBOdinAjaxRequest {
       case "CleaningJobListRequest" => upickle.read[CleaningJobListRequest](request)
       case "CleaningJobTaskListRequest" => upickle.read[CleaningJobTaskListRequest](request)
       case "CleaningJobTaskFocusedListRequest" => upickle.read[CleaningJobTaskFocusedListRequest](request)
+      case "CleaningJobTaskListSchemaRequest" => upickle.read[CleaningJobTaskListSchemaRequest](request)
       case "CleaningJobDataRequest" => upickle.read[CleaningJobDataRequest](request)
       case "CleaningJobDataCountRequest" => upickle.read[CleaningJobDataCountRequest](request)
       case "CleaningJobDataAndCountRequest" => upickle.read[CleaningJobDataAndCountRequest](request)
@@ -41,11 +42,13 @@ case class NoRequest() extends UBOdinAjaxRequest("NoRequest")
 
 case class CleaningJobListRequest(deviceID: String) extends UBOdinAjaxRequest("CleaningJobListRequest") 
 
-case class CleaningJobTaskListRequest(deviceID: String, cleaningJobID: String, count: Int, offset:Int) extends UBOdinAjaxRequest("CleaningJobTaskListRequest") 
+case class CleaningJobTaskListRequest(deviceID: String, cleaningJobID: String, operator:String, count: Int, offset:Int) extends UBOdinAjaxRequest("CleaningJobTaskListRequest") 
 
-case class CleaningJobTaskFocusedListRequest(deviceID: String, cleaningJobID: String, rowIDs:Seq[String], cols:Seq[String]) extends UBOdinAjaxRequest("CleaningJobTaskFocusedListRequest") 
+case class CleaningJobTaskListSchemaRequest(deviceID: String, cleaningJobID: String, operator:String, cols:Seq[String] ) extends UBOdinAjaxRequest("CleaningJobTaskListSchemaRequest") 
 
-case class CleaningJobDataRequest(deviceID: String, cleaningJobID: String, count: Option[Int], offset:Option[Int]) extends UBOdinAjaxRequest("CleaningJobDataRequest")
+case class CleaningJobTaskFocusedListRequest(deviceID: String, cleaningJobID: String, operator:String, rowIDs:Seq[String], cols:Seq[String]) extends UBOdinAjaxRequest("CleaningJobTaskFocusedListRequest") 
+
+case class CleaningJobDataRequest(deviceID: String, cleaningJobID: String, operatorStack:Seq[String], count: Option[Int], offset:Option[Int]) extends UBOdinAjaxRequest("CleaningJobDataRequest")
 
 case class CleaningJobDataCountRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("CleaningJobDataCountRequest")
 
@@ -79,7 +82,7 @@ case class CleaningJobModRepairRequest(deviceID:String, cleaningJobID:String, mo
 
 case class UserActionLogRequest(deviceID:String, eventType:String, target:String, xCoord:Int, yCoord:Int, scroll:Int, timestamp:Long, extra:String) extends UBOdinAjaxRequest("UserActionLogRequest") 
 
-case class RollUpCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("RollUpCleaningJobDataRequest")
+case class RollUpCleaningJobDataRequest(deviceID: String, cleaningJobID: String, operator:Seq[String], filters:Seq[SliceDiceFilter], groupBy:Set[String], aggrs:Seq[SliceDiceAggr]) extends UBOdinAjaxRequest("RollUpCleaningJobDataRequest")
 case class DrillDownCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("DrillDownCleaningJobDataRequest")
 case class SliceCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("SliceCleaningJobDataRequest")
 case class DiceCleaningJobDataRequest(deviceID: String, cleaningJobID: String) extends UBOdinAjaxRequest("DiceCleaningJobDataRequest")

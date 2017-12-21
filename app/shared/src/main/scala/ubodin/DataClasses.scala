@@ -30,7 +30,15 @@ case class CleaningJobDataCell(var data:String, var isDet: Boolean)
 
 case class CleaningJobDataRow(data:Vector[CleaningJobDataCell], isDet: Boolean, prov: String) 
 
-case class CleaningJobData(cleaningJobDataID: Int, cleaningJobID: Int, cols:Vector[String], data:Vector[CleaningJobDataRow]) 
+case class CleaningJobData(cleaningJobDataID: Int, cleaningJobID: Int, operator:Seq[String], cols:Vector[String], data:Vector[CleaningJobDataRow]) 
+
+///--------------------------------------------
+/// Slice/Dice, Roll up, Drill down
+///--------------------------------------------
+case class SliceDiceFilter(id:String,col:String,op:String,value:String)
+
+case class SliceDiceAggr(id:String,col:String,op:String)
+  
 
 ///--------------------------------------------
 /// Reasons and Repairs
