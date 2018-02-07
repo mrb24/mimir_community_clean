@@ -67,21 +67,20 @@ object UBOdinAppHeader {
     val onMouseLeave = t.modState(_.copy(menuHover = ""))
 
     def render(S: State) = {
-      val github: String = "Mimir"
+      val headTitle: String = "Community Clean"
       <.header(Style.headerStyle)(
         <.nav(Style.menuNav)(
-          <.a(Style.logo, ^.href := "#")(<.img(^.src := "app/images/mimir.png", ^.width := "150px")),
+          <.a(Style.logo, ^.target :="_blank", ^.href := "https://github.com/UBOdin/mimir/tree/MimirGProMIntegration")(<.img(^.src := "app/images/mimir.png", ^.width := "150px")),
           <.div(^.marginLeft := "auto")(
             MuiMuiThemeProvider()(
               MuiIconButton(onTouchTap = mainMenuClick.getOrElse(mainMenuNoneClick).asInstanceOf[(TouchTapEvent) => Callback])(NavigationMenu()())
             ),
             <.a(
-              ^.target :="_blank" ,
-              (S.menuHover == github) ?= Style.menuItemHover,
+              (S.menuHover == headTitle) ?= Style.menuItemHover,
               Style.menuItem,
-              ^.href := "https://github.com/UBOdin/mimir/tree/MimirGProMIntegration",
-              ^.onMouseEnter --> onMouseEnter(github),
-              ^.onMouseLeave --> onMouseLeave)(github)
+              ^.href := "/",
+              ^.onMouseEnter --> onMouseEnter(headTitle),
+              ^.onMouseLeave --> onMouseLeave)(headTitle)
           )
         )
       )

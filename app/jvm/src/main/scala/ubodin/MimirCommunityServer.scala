@@ -46,6 +46,15 @@ import mimir.algebra.Comparison
 import mimir.algebra.Aggregate
 import mimir.algebra.AggFunction
 import mimir.algebra.Var
+import mimir.util.TextUtils
+import mimir.algebra.PrimitiveValue
+import java.util.concurrent.TimeUnit
+import mimir.algebra.Expression
+
+import ubodin.VistrailsClasses
+import java.nio.file.Files
+import java.nio.file.Paths
+import scala.scalajs.niocharset.StandardCharsets
 
 class MainServlet() extends HttpServlet {
   override def doPost(req : HttpServletRequest, resp : HttpServletResponse) = {
@@ -233,8 +242,11 @@ object SharedServlet {
         val tasksSchema = CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobTasksSchema))
         val data = CleaningJobDataResponse(cleaningJobData, 5, 0)
         println("getting count")
-        val dataCount = CleaningJobDataCountResponse(1000)//getCleaningJobDataCount(deviceID, cleaningJobID))
-        (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, tasksSchema, data, dataCount))
+        val dataCount = CleaningJobDataCountResponse(getCleaningJobDataCount(deviceID, cleaningJobID))
+        val cjr = (LoadCleaningJobResponse(getCleaningJob(cleaningJobID), options, settings, tasks, tasksSchema, data, dataCount))
+        //val loadResp = upickle.write(cjr)
+        //println(loadResp)
+        cjr
       }
       case UserInfoRequest(deviceID) => {
         (UserInfoResponse(getUserInfo(deviceID).head))
@@ -398,7 +410,7 @@ object SharedServlet {
             MimirCommunityServer.explainEverything(Json.toOperator(Json.parse(operator))/*assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))*/).map(reasonSet => {
                reasonSet.take(MimirVizier.db, count, offset).map(reason => { 
                  val containedRepair = containRepair(reason.repair)
-                 CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containedRepair, reason.args.map( _.toString).toList )))
+                 CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containedRepair, reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed )))
                })
              }).flatten
           }).list.apply()
@@ -416,7 +428,7 @@ object SharedServlet {
             val oper = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
             MimirCommunityServer.explainSchema(oper, cols).map(reasonSet => {
              reasonSet.all(MimirVizier.db).map(reason => { 
-               CleaningJobTaskGroup(List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )))
+               CleaningJobTaskGroup(List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed)))
              })}).flatten.toList 
           }).list.apply()
         }
@@ -436,7 +448,7 @@ object SharedServlet {
                 rows.map(row => CleaningJobTaskGroup(MimirCommunityServer.explainSubsetWithoutSchema(oper, Seq(row), cols).map(reasonSet => {
                  reasonSet.all(MimirVizier.db).map(reason => { 
                    //upickle.read[CleaningJobTask](reason.toJSON)
-                   CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )
+                   CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed )
                  })
                }).flatten.toList))
               }
@@ -446,7 +458,7 @@ object SharedServlet {
                 MimirCommunityServer.explainSubsetWithoutSchema(oper/*assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))*/, rows, cols).map(reasonSet => {
                  reasonSet.all(MimirVizier.db).map(reason => { 
                    //CleaningJobTaskGroup( List(upickle.read[CleaningJobTask](reason.toJSON)))
-                   CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList )))
+                   CleaningJobTaskGroup( List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed )))
                  })
                }).flatten
               }
@@ -478,7 +490,7 @@ object SharedServlet {
                            val cjt = srcReason.confirmed match {
                              case true if !sourcedFeedbackModel.hasGroundFeedback(reason.idx, reason.args) =>  {
                                val modRepair = mimir.ctables.ModerationRepair("\"" +sourcedFeedbackModel.getFeedback(reason.idx, reason.args).get.asString + "\"")
-                               Some(CleaningJobTask(srcReason.model.name, srcReason.idx, srcReason.reason, containRepair(modRepair), srcReason.args.map( _.toString).toList ))
+                               Some(CleaningJobTask(srcReason.model.name, srcReason.idx, srcReason.reason, containRepair(modRepair), srcReason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed ))
                              }
                              case _ => None
                            }
@@ -490,7 +502,7 @@ object SharedServlet {
                      }
                      case _ => reason.confirmed match {
                            case true =>  {
-                             List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList ))
+                             List(CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed ))
                            }
                            case false => List()
                          }
@@ -598,14 +610,32 @@ object SharedServlet {
     cleaningJobDataPlot.head
   }
   
+  def replaceCastExpression(expr:Expression) : Expression = {
+    expr match {
+      case mimir.algebra.Function("CAST", args) => {
+        args.head.recur(replaceCastExpression(_))
+      }
+      case x => x.recur(replaceCastExpression(_))
+    }  
+  }
+  
+  def replaceCastExpression(oper:Operator) : Operator = {
+    oper.recurExpressions(replaceCastExpression(_)).recur(replaceCastExpression(_))
+  }
+
+  
   def getCleaningJobDataCount(deviceID:String, cleaningJobID:String) : Int = {
     val cleaningJobDataCount = NamedDB("mimir_community_server") autoCommit { implicit session =>
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
              val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-             val oper = query.count(false)
+             val oper = replaceCastExpression(MimirVizier.db.compiler.optimize(MimirVizier.db.views.resolve(MimirVizier.db.compiler.optimize(query.project(query.columnNames.head))))).count(false)
+             //println(oper)
              val queryRes = MimirCommunityServer.queryMimir(oper)
-             queryRes._2.head.data.head.data.toInt
+             queryRes._2.headOption match {
+               case Some(head) => head.data.head.data.toInt
+               case None => 0
+             }
           }).single.apply()
         }
         cleaningJobDataCount.get
@@ -740,7 +770,8 @@ object SharedServlet {
   }
   
   def logUserAction(userAction:UserActionLogRequest) : Unit = {
-    NamedDB("mimir_community_server") autoCommit  { implicit session =>
+    try {
+      NamedDB("mimir_community_server") autoCommit  { implicit session =>
            sql"""INSERT INTO USER_ACTION_LOG ( USER_ID, DEVICE_ID, USER_ACTION ) VALUES (
                     (SELECT USER_ID FROM USER_DEVICES u WHERE u.DEVICE_ID = (SELECT DEVICE_ID FROM DEVICES WHERE DEVICE_UID = ${userAction.deviceID})),
                     (SELECT DEVICE_ID FROM DEVICES WHERE DEVICE_UID = ${userAction.deviceID}),
@@ -748,6 +779,9 @@ object SharedServlet {
             .execute                
             .apply() 
            }
+    } catch {
+      case t: Throwable => t.printStackTrace() // TODO: handle error
+    } 
   }
   
   def list(path: String) = {
@@ -759,6 +793,13 @@ object SharedServlet {
       f <- files
       if f.getName.startsWith(last)
     } yield (f.getName, f.length())
+  }
+  
+  def loadVistrailsWorkflow() = {
+    val vtwf = VistrailsClasses.loadVtWorkflowFromXmlFile("/Users/michaelbrachmann/Documents/buf_shoot_cc.xml")
+    val mxgwf = VistrailsClasses.convertVtToMx(vtwf)
+    val mxXml = VistrailsClasses.mxWorkflowToXml(mxgwf)
+    mxXml
   }
 }
 
@@ -832,6 +873,11 @@ object MimirCommunityServer {
     server.start()
     
      mimirThread.start()
+     
+     /*val vtXml = SharedServlet.loadVistrailsWorkflow()
+     println(vtXml)
+     Files.write(Paths.get("/Users/michaelbrachmann/source/mxGraph/workflow.xml"), vtXml.getBytes(StandardCharsets.UTF_8))*/
+     
      server
   }
   
@@ -954,7 +1000,7 @@ object MimirCommunityServer {
   def explainSubset(oper:Operator, rows:Seq[String], cols:Seq[String]): Seq[mimir.ctables.ReasonSet] = {
     val reasons = mimirThread.runOnThread[Seq[mimir.ctables.ReasonSet]](new MimirRunnable[Seq[mimir.ctables.ReasonSet] ](){
       def run() = {
-        println(s"explainSubset ----------:\noper:$oper\nrows:$rows\ncols:$cols\n----------------------")
+        //println(s"explainSubset ----------:\noper:$oper\nrows:$rows\ncols:$cols\n----------------------")
         returnedValue = Some(MimirVizier.explainSubset(oper, rows, cols))
       }
     })
@@ -1027,11 +1073,20 @@ object MimirCommunityServer {
   def feedback( model:String, idx:Int, args:Seq[String], repairValue:String): Unit = {
     val reasons = mimirThread.runOnThread[Boolean](new MimirRunnable[Boolean](){
       def run() = {
-        doFeedback(model, idx, args, repairValue)
+        val theModel = MimirVizier.db.models.get(model)
+        val repairArgs = args.zip(theModel.argTypes(idx)).map(argTyp => TextUtils.parsePrimitive(argTyp._2, argTyp._1))
+        val repairPrimitive = TextUtils.parsePrimitive(theModel.varType(idx, repairArgs.map(_.getType)),repairValue)
+        doFeedback(theModel, idx, repairArgs, repairPrimitive)
         returnedValue = None
       }
     })
     println("")
+  }
+  
+  private def doFeedback( model:mimir.models.Model, idx:Int, args:Seq[PrimitiveValue], repairValue:PrimitiveValue): Unit = {
+    model.feedback(idx, args, repairValue)
+    MimirVizier.db.models.persist(model)
+    println(s"feedback given by: ${mimir.models.FeedbackSource.feedbackSource}")
   }
   
   private def doFeedback( model:String, idx:Int, args:Seq[String], repairValue:String): Unit = {
@@ -1103,7 +1158,7 @@ object MimirCommunityServer {
         val results = new java.util.Vector[Row]()
          var cols : Seq[String] = null
          var colsIndexes : Seq[Int] = null
-         
+         println(oper)
          MimirVizier.db.query(oper)( resIter => {
              cols = resIter.schema.map(f => f._1)
              colsIndexes = resIter.schema.zipWithIndex.map( _._2)
@@ -1129,10 +1184,12 @@ object MimirCommunityServer {
     val none = mimirThread.runOnThread[Boolean](new MimirRunnable[Boolean](){
       def run() = {
         val theModel = MimirVizier.db.models.get(model)
+        val repairArgs = args.zip(theModel.argTypes(idx)).map(argTyp => TextUtils.parsePrimitive(argTyp._2, argTyp._1))
+        val repairPrimitive = TextUtils.parsePrimitive(theModel.varType(idx, repairArgs.map(_.getType)),repairValue)
         theModel match {
           case sourcedFeedbackModel:SourcedFeedbackT[Any] => {
             mimir.models.FeedbackSource.feedbackSource = FeedbackSourceIdentifier(deviceID, SharedServlet.getUserName(deviceID))
-            doFeedback(model, idx, args, repairValue)
+            doFeedback(theModel, idx, repairArgs, repairPrimitive)
             mimir.models.FeedbackSource.feedbackSource = FeedbackSourceIdentifier()
           }
           case _ => doFeedback(model, idx, args, repairValue)  
@@ -1150,38 +1207,45 @@ object MimirCommunityServer {
     }
   }
   
+  
   var running = true;
   
   class MimirThread extends Thread {
     val execQueue = new LinkedBlockingQueue[MimirRunnable[_]]()
     val returnQueue = new LinkedBlockingQueue[Any]()
     override def run() = {
-      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-PROVENANCE"*/, "NO-VISTRAILS", "QUIET-LOG", "LOG"))
+      MimirVizier.main(Array("--db","mimir_community_clean.db","--X","INLINE-VG"/*,"GPROM-BACKEND", "GPROM-PROVENANCE", "GPROM-DETERMINISM"*/, "NO-VISTRAILS", "QUIET-LOG", "LOG"))
       while(running){
         try {
           val runnable = execQueue.take()
           runnable.run()
           returnQueue.put( runnable.getReturnedValue )
         } catch {
-          case t: Throwable => println("MimirThread: take interrupted: " + t.toString())
-        }
-        
+          case ie: InterruptedException => {
+            println("MimirThread: take interrupted: " + ie.toString())
+          }
+          case t: Throwable => t.printStackTrace()
+        } 
       }
     }
     def runOnThread[ReturnType](runnable:MimirRunnable[ReturnType]) : Option[ReturnType] = {
-      synchronized {
-        try{
+      try{
           execQueue.put(runnable)
           returnQueue.take().asInstanceOf[Option[ReturnType]]
         } catch {
+          case ie: InterruptedException => {
+            println(s"MimirThread.runOnThread: take interrupted for: $runnable")
+            None
+          }
           case t: Throwable => {
-            println("MimirThread.runOnThread: take interrupted...")
+            t.printStackTrace()
             None
           }
         }
       }
-    }
   }
   
   val mimirThread = new MimirThread()
+
+ 
 }

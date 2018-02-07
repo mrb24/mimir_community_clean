@@ -38,6 +38,10 @@ val app = crossProject.settings(
     "com.github.japgolly.scalacss"      %%% "ext-react" % scalaCSSVersion
   )
 ).jvmSettings(
+  //fork := true,
+  //outputStrategy in run := Some(StdoutOutput),
+  //connectInput in run := true,
+  //javaOptions += "-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5005",
   mainClass in (Compile, run) := Some("ubodin.MimirCommunityServer"),
   libraryDependencies ++= Seq(
     "javax.servlet" % "javax.servlet-api" % "3.1.0" % "provided",
@@ -76,7 +80,8 @@ val app = crossProject.settings(
   	//spark ml
     "org.apache.spark" % "spark-sql_2.11" % "2.2.0",
     "org.apache.spark" % "spark-mllib_2.11" % "2.2.0",
-  	"net.sf.py4j" % "py4j" % "0.10.4"
+  	"net.sf.py4j" % "py4j" % "0.10.4",
+  	"org.scala-lang.modules" %% "scala-xml" % "1.0.6"
   ),
   resolvers += "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository",
   resolvers += Resolver.mavenLocal,
@@ -88,3 +93,42 @@ lazy val appJS = app.js
 lazy val appJVM = app.jvm.settings(
   (resources in Compile) += (fastOptJS in (appJS, Compile)).value.data
 )
+
+//lazy val buildDockerImage = inputKey[Unit]("build DockerImage")
+//buildDockerImage := {
+	//import sbtdocker.Instructions._
+    import sbtdocker._
+	enablePlugins(DockerPlugin)
+	dockerfile in docker := {
+		val instructions = Seq(
+		  sbtdocker.Instructions.From("frolvlad/alpine-oraclejdk8"),
+		  //sbtdocker.Instructions.From("ubuntu"),
+		  /*sbtdocker.Instructions.Run.exec(Seq("apt-get", "-y", "install", "python-software-properties")),
+		  sbtdocker.Instructions.Run.exec(Seq("add-apt-repository", "-y", "ppa:webupd8team/java")),
+		  sbtdocker.Instructions.Run.exec(Seq("apt-get", "-y", "update")),
+		  sbtdocker.Instructions.Run.exec(Seq("apt-get", "-y", "install", "oracle-java8-installer")),
+		  sbtdocker.Instructions.Run.exec(Seq("echo","\"deb https://dl.bintray.com/sbt/debian /\"", "|", "tee -a /etc/apt/sources.list.d/sbt.list")),
+		  sbtdocker.Instructions.Run.exec(Seq("apt-key", "adv", "--keyserver", "hkp://keyserver.ubuntu.com:80", "--recv", "2EE0EA64E40A89B84B2DF73499E82A75642AC823")),
+		  sbtdocker.Instructions.Run.exec(Seq("apt-get", "-y", "update")),
+		  sbtdocker.Instructions.Run.exec(Seq("apt-get", "-y", "install", "sbt")),*/
+		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "bash")),
+		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "curl")),
+          sbtdocker.Instructions.Run("curl -sL \"http://dl.bintray.com/sbt/native-packages/sbt/1.0.0-M4/sbt-1.0.0-M4.tgz\" | gunzip | tar -x -C /usr/local"),
+    	  //sbtdocker.Instructions.Run.exec(Seq("curl", "http://dl.bintray.com/sbt/native-packages/sbt/1.0.0-M4/sbt-1.0.0-M4.tgz")),
+    	  //sbtdocker.Instructions.Run.exec(Seq("ls")),
+    	  //sbtdocker.Instructions.Run.exec(Seq("gunzip", "sbt-1.0.0-M4.tgz")),
+		  //sbtdocker.Instructions.Run.exec(Seq("tar", "-x", "-f", "sbt.tar", "-C", "/usr/local")),
+    	  sbtdocker.Instructions.Run.exec(Seq("ln", "-s", "/usr/local/sbt/bin/sbt", "/usr/local/bin/sbt")),
+    	  sbtdocker.Instructions.Run.exec(Seq("chmod", "0755", "/usr/local/bin/sbt")),
+    	  //sbtdocker.Instructions.Run.exec(Seq("apk", "del", "build-dependencies")),
+    	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "git")),
+    	  sbtdocker.Instructions.Run("cd /usr/local"),
+    	  sbtdocker.Instructions.Run("git clone git@gitlab.odin.cse.buffalo.edu:mimir/mimir-community-clean.git"),
+		  sbtdocker.Instructions.Run("cd mimir-community-clean"),
+		  sbtdocker.Instructions.Cmd("sbt \"appJVM/run\"")
+		)
+		Dockerfile(instructions)
+	}
+//}
+
+

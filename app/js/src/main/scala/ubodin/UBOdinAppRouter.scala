@@ -128,7 +128,7 @@ object NetworkCommunication {
           // These are message-receiving events from the WebSocket "thread".
           def onmessage(e: MessageEvent): Unit = {
             val respWrapped = upickle.read[WSResponseWrapper](e.data.toString)
-            println(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType}")
+            //println(s"WS Message Details : UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType}")
             direct.modState(_.copy().wslog(s"WebSocket Message: UID: ${respWrapped.responseUID} Type: ${respWrapped.responseType} Size: ${respWrapped.response.length()}"),
             (direct.state.webSocketState.handlers.getOrElse(respWrapped.responseUID, 
                 defaultHandler( Callback.warn("WS Response Not Handled: " + respWrapped.responseUID + " -> " + respWrapped.responseType + ": " + e.data.toString) )

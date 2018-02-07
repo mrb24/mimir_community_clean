@@ -17,7 +17,7 @@ object DatabaseManager {
     
     // all the connections are released, old connection pool will be abandoned
     ConnectionPool.add("mimir_community_server", dbUrl, "", "", settings)
-  
+    
   }
   def shutdownDatabase() : Unit = {
     ConnectionPool.closeAll()

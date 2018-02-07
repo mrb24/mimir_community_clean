@@ -25,6 +25,7 @@ import scalacss.ScalaCssReact._
 
 import org.scalajs.dom.{WebSocket, MessageEvent, Event, CloseEvent, ErrorEvent}
 import scala.util.{Success, Failure}
+import scala.util.Try
 
 object UBOdinCleaningJobPage extends NetworkInterface {
   import RCustomStyles._
@@ -120,6 +121,16 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       ^.float := "left",
       ^.minWidth := "264px",
       ^.height := "84%" )
+      
+    val taskListContainer = Seq(
+        ^.height := "100%",
+        ^.width := "390px",
+        ^.overflow := "auto")
+    
+    val taskListContainerInner = Seq(
+        ^.height := "auto",
+        ^.overflowX := "hidden",
+        ^.overflowY := "auto")
       
     val cleaningSection = Seq(
       ^.display := "block" ,
@@ -248,7 +259,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       network.ajaxRequest(url, data, responseText => {
         val cleaningJobLoadResponse = upickle.read[LoadCleaningJobResponse](responseText)
         t.modState(s => s.copy(cleaningJobTypeState = CleaningJobTypeState(cleaningJobLoadResponse.job.jobType)),
-        getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >>
+        getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >> 
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
         cleaningJobDataCountResponse(cleaningJobLoadResponse.dataCount, t) >>
         cleaningJobDataResponse(cleaningJobLoadResponse.data, t) >>
@@ -437,7 +448,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           val data = upickle.write(CleaningJobRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
           network.ajaxRequest(url, data, responseText => {
             val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
-            t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
+            t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)) >> requestCleaningJobTaskListSchema(cleaningJobID, s.dataTableState.data.operator.head, s.dataTableState.data.cols))
           })
         }
       })
@@ -468,7 +479,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
     def onTableCellClick(col:String, desc: String, tableRow:ODInTable.Model): Callback = {
       t.modState(s => s.cleaningJobTypeState match { 
           case CleaningJobTypeState("GIS") => { 
-            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val houseNumber = s"${Try{tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt.toString}.toOption.getOrElse("")}"
             val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
             val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
             val state = "NY"
@@ -523,7 +534,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       println(s"pageChange: offset: $offset rowCount:${tableRows.length}")
       t.modState(s => s.cleaningJobTypeState match {
             case CleaningJobTypeState("GIS") => { 
-               s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))) 
+               s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows), mapState = MapState( LatLng(42.8864 ,-78.8784), tableRows.map(row => getMarkerFromModel(row, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${Try{row.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt.toString}.toOption.getOrElse("")} ${row.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" ) ).toList , 10, s.drawerState.selected.contains("CLUSTER"))) 
             }
             case CleaningJobTypeState("DATA") => {   
               s.copy( dataTableViewState = s.dataTableViewState.copy(offset = offset, rows = tableRows)) 
@@ -558,12 +569,12 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       tableRow => 
         t.modState(s => s.cleaningJobTypeState match { 
           case CleaningJobTypeState("GIS") => { 
-            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val houseNumber = s"${Try{tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt.toString}.toOption.getOrElse("")}"
             val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
             val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
             val state = "NY"
             val rowIDs = s.dataTableViewState.rows.map(_.prov)
-            s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state)) 
+            s.copy(selectedTask = Some(s.taskListState.data(rowIDs.indexOf(tableRow.prov))), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"$houseNumber $streetName" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state)) 
           }
           case CleaningJobTypeState("DATA") => {   
             s.copy(selectedRow = Some(tableRow))
@@ -596,12 +607,12 @@ object UBOdinCleaningJobPage extends NetworkInterface {
        reasons => e => t.modState(s => s.cleaningJobTypeState match { 
           case CleaningJobTypeState("GIS") => { 
             val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
-            val houseNumber = s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt}"
+            val houseNumber = s"${ Try { tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt.toString}.toOption.getOrElse("") }"
             val streetName = s"${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" 
             val city = s"${tableRow.data(s.addrColsState.cityIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}"
             val state = "NY"
             val rowIDs = s.dataTableViewState.rows.map(_.prov)
-            s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"${tableRow.data(s.addrColsState.houseNumberIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "").toDouble.toInt} ${tableRow.data(s.addrColsState.streetIdx).asInstanceOf[CleaningJobDataCell].data.replaceAll("'", "")}" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
+            s.copy(selectedTask = Some(reasons), selectedRow = Some(tableRow), mapState = MapState( LatLng(tableRow.data(s.latLonColsState.latColIdx).data.replaceAll("'", "").toDouble, tableRow.data(s.latLonColsState.lonColIdx).data.replaceAll("'", "").toDouble), List(getMarkerFromModel(tableRow, s.latLonColsState.latColIdx, s.latLonColsState.lonColIdx, s"$houseNumber $streetName" )), 17, s.drawerState.selected.contains("CLUSTER")), addressState = AddressState(houseNumber, streetName, city, state))
           }
           case CleaningJobTypeState("DATA") => {   
             val tableRow = s.dataTableViewState.rows(s.taskListState.data.indexOf(reasons))
@@ -940,18 +951,26 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           val selectedTask = s.selectedTask
           selectedTask match { 
             case Some(tasks) => {
-              val uncertainValues = tasks.tasks.map(task => (task.english, ""))
+              
+              val reasonsChoices = tasks.tasks.map(task => {
+                val reason = CleaningJobTaskRepair.readRepair(task.repair.repairType, task.repair.repairJson)
+                val reasonChoices = reason match {
+                    case CleaningJobTaskRepairFromList(selector, values) => values.toSeq.sortBy(_.weight).map(value => value.choice)
+                    case CleaningJobTaskRepairByType(selector, typ) => task.guess
+                  }
+                (task, reasonChoices)
+              })
               val stateDialogActions: ReactNode = js.Array(
                 MuiFlatButton(key = "1", label = "Cancel", secondary = true, onTouchTap = handleDialogCancel)(),
-                MuiFlatButton(key = "2", label = "Repair Manually", secondary = true, onTouchTap = handleDialogManualRepairEntry(Seq()))()
+                MuiFlatButton(key = "2", label = "Repair Manually", secondary = true, onTouchTap = handleDialogManualRepairEntry(reasonsChoices.unzip._1.map(_.args).headOption.getOrElse(Seq.empty[String])))()
               )  
               val content = <.div(
                 <.h3("Repair Dialog"),
                 <.div()(
                   <.div(^.display := "inline-block", ^.margin := "40px", ^.maxWidth := "40%", ^.verticalAlign := "top")(
                       <.h4("Uncertain Value: "),
-                      <.div( s"${uncertainValues.mkString(",")}"),
-                      MuiFlatButton(key = "3", label = "Acknowledge Current", secondary = true, onTouchTap = handleDialogRepairGeneral(tasks, null, uncertainValues.unzip._2))()
+                      <.div( s"${reasonsChoices.unzip._1.map(_.english).mkString(",")}"),
+                      MuiFlatButton(key = "3", label = "Acknowledge Current", secondary = true, onTouchTap = handleDialogRepairGeneral(tasks, null, reasonsChoices.unzip._1.map(_.guess)))()
                   ))
                 )
               t.modState(s => s.copy(dialogState = DialogState(true, "", "", Some(content), Some(stateDialogActions)))) >> Callback.info("Opened")
@@ -1112,41 +1131,44 @@ object UBOdinCleaningJobPage extends NetworkInterface {
               )()
             )
           ),
-          UBOdinMobileTearSheet(
-            MuiTabs[Int](value = S.taskListTabsState.tab, onChange = onTaskListTabChange)(
-              MuiTab(label = <.span("Data Tasks ":ReactNode, MuiAvatar(key = "data_task_badge", size = 22, backgroundColor = colors.red400)(S.taskListState.data.length:ReactNode)):ReactNode, value = 1)(
-                MuiList(key = "task_list")(
-                    S.taskListState.data.zipWithIndex.map(listElement => {
-                      MuiListItem(
-                          key = s"item${listElement._2}", 
-                          primaryText = toElement(listElement._1),
-                          leftIcon           = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
-                          //rightIcon          = AlertWarning()(),
-                          //onKeyboardFocus    = muiTaskListFocusEvent,
-                          //onMouseLeave       = muiTaskListEvent,
-                          //onMouseEnter       = muiTaskListEvent,
-                          //onNestedListToggle = muiTaskListAnyEvent,
-                          //onTouchStart       = muiTaskListTouchEvent,
-                          onTouchTap         = muiTaskListTouchTapEvent(listElement._1))()
-                    }) : _*
+          //UBOdinMobileTearSheet(
+          <.div(Style.taskListContainer)(
+            <.div(Style.taskListContainerInner)(
+              MuiTabs[Int](value = S.taskListTabsState.tab, onChange = onTaskListTabChange)(
+                MuiTab(label = <.span("Data Tasks ":ReactNode, MuiAvatar(key = "data_task_badge", size = 22, backgroundColor = colors.red400)(S.taskListState.data.length:ReactNode)):ReactNode, value = 1)(
+                  MuiList(key = "task_list")(
+                      S.taskListState.data.zipWithIndex.map(listElement => {
+                        MuiListItem(
+                            key = s"item${listElement._2}", 
+                            primaryText = toElement(listElement._1),
+                            leftIcon           = {if(listElement._1.tasks.foldLeft(true)((init,elem) => init && elem.confirmed))ActionCheckCircle()() else AlertWarning()()},
+                            //rightIcon          = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
+                            //onKeyboardFocus    = muiTaskListFocusEvent,
+                            //onMouseLeave       = muiTaskListEvent,
+                            //onMouseEnter       = muiTaskListEvent,
+                            //onNestedListToggle = muiTaskListAnyEvent,
+                            //onTouchStart       = muiTaskListTouchEvent,
+                            onTouchTap         = muiTaskListTouchTapEvent(listElement._1))()
+                      }) : _*
+                  )
+                ),
+                MuiTab(label = <.span("Schema Tasks ":ReactNode, MuiAvatar(key = "data_task_schema_badge", size = 22, backgroundColor = colors.red400)(S.taskListSchemaState.data.length:ReactNode)):ReactNode, value = 2)(
+                  MuiList(key = "task_list_schema")(
+                      S.taskListSchemaState.data.zipWithIndex.map(listElement => {
+                        MuiListItem(
+                            key = s"item${listElement._2}", 
+                            primaryText = toElement(listElement._1),
+                            leftIcon           = {if(listElement._1.tasks.foldLeft(true)((init,elem) => init && elem.confirmed))ActionCheckCircle()() else AlertWarning()()},
+                            //rightIcon          = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
+                            //onKeyboardFocus    = muiTaskListFocusEvent,
+                            //onMouseLeave       = muiTaskListEvent,
+                            //onMouseEnter       = muiTaskListEvent,
+                            //onNestedListToggle = muiTaskListAnyEvent,
+                            //onTouchStart       = muiTaskListTouchEvent,
+                            onTouchTap         = muiTaskListSchemaTouchTapEvent(listElement._1))()
+                      }) : _*
+                  )  
                 )
-              ),
-              MuiTab(label = <.span("Schema Tasks ":ReactNode, MuiAvatar(key = "data_task_schema_badge", size = 22, backgroundColor = colors.red400)(S.taskListSchemaState.data.length:ReactNode)):ReactNode, value = 2)(
-                MuiList(key = "task_list_schema")(
-                    S.taskListSchemaState.data.zipWithIndex.map(listElement => {
-                      MuiListItem(
-                          key = s"item${listElement._2}", 
-                          primaryText = toElement(listElement._1),
-                          leftIcon           = {if(S.selectedTask.equals(listElement._1))AlertErrorOutline()() else AlertWarning()()},
-                          //rightIcon          = AlertWarning()(),
-                          //onKeyboardFocus    = muiTaskListFocusEvent,
-                          //onMouseLeave       = muiTaskListEvent,
-                          //onMouseEnter       = muiTaskListEvent,
-                          //onNestedListToggle = muiTaskListAnyEvent,
-                          //onTouchStart       = muiTaskListTouchEvent,
-                          onTouchTap         = muiTaskListSchemaTouchTapEvent(listElement._1))()
-                    }) : _*
-                )  
               )
             )
           )
@@ -1202,6 +1224,16 @@ object UBOdinCleaningJobPage extends NetworkInterface {
             case CleaningJobTypeState("INTERACTIVE") => {   
               <.div(Style.cleaningSection)(
                   <.div(Style.sliceDiceSection)(
+                       MuiToolbar(style = js.Dynamic.literal(width = "100%"))(
+                          MuiToolbarGroup(key = "1")(
+                            MuiRaisedButton(key = "applyDrillDown", label = "Go Back", onTouchTap = onDrillOutTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, disabled = (S.dataTableState.data.operator.length < 2))() 
+                          ),
+                          MuiToolbarGroup(key = "2")(
+                            MuiToolbarTitle(text = "options")(),
+                            MuiToolbarSeparator()(),
+                            MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true)()
+                          ) 
+                       ),
                        MuiPaper(style = js.Dynamic.literal(display = "inline-flex", width = "100%"))(
                            <.div(Style.sliceDiceInnerSection)(
                               <.div(Style.sliceDiceFilterSection)( 
@@ -1268,18 +1300,8 @@ object UBOdinCleaningJobPage extends NetworkInterface {
                                      } ), 
                                   MuiIconButton(onTouchTap = onAggrAddTouch)(ContentAdd()())
                               )
-                          ),
-                          <.div(Style.sliceDiceFilterRow)(
-                              S.dataTableState.data.operator match {
-                                case Seq() => MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(margin = "5px"))()
-                                case Seq(oper:String) => MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(margin = "5px"))()
-                                case x => {
-                                  Seq(MuiRaisedButton(key = "applyRollup", label = "Apply", onTouchTap = onRollupApplyTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(display = "inline-block", margin = "5px"))(),
-                                  MuiRaisedButton(key = "applyDrillDown", label = "Go Back", onTouchTap = onDrillOutTouch(S.sliceDiceState, S.dataTableState.data.operator), primary = true, style = js.Dynamic.literal(display = "inline-block", margin = "5px"))())
-                                }
-                              }
                           )
-                       )    
+                       )  
                   ),
                   <.div(Style.cleaningFullTableSection)(
                     if(S.dataTableState.loaded)

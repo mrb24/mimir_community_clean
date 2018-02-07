@@ -95,8 +95,10 @@ case class CleaningJobTask(
   varid: Double,
   english: String,
   repair: CleaningJobRepairContainer,
-  args: List[String]//,
-  //hints: List[String]
+  args: List[String],
+  //hints: List[String],
+  guess:String,
+  confirmed:Boolean
 )
 
 case class CleaningJobTaskGroup( tasks:List[CleaningJobTask] )
