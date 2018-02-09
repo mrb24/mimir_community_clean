@@ -104,14 +104,19 @@ lazy val appJVM = app.jvm.settings(
 		  sbtdocker.Instructions.From("frolvlad/alpine-oraclejdk8"),
 		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "bash")),
 		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "curl")),
-          sbtdocker.Instructions.Run("curl -sL \"http://dl.bintray.com/sbt/native-packages/sbt/0.13.15/sbt-0.13.15.tgz\" | gunzip | tar -x -C /usr/local"),
+          //sbtdocker.Instructions.Run("curl -sL \"http://dl.bintray.com/sbt/native-packages/sbt/0.13.15/sbt-0.13.15.tgz\" | gunzip | tar -x -C /usr/local"),
+    	  sbtdocker.Instructions.Run("curl -sL \"https://github.com/sbt/sbt/releases/download/v0.13.15/sbt-0.13.15.tgz\" | gunzip | tar -x -C /usr/local"),
     	  sbtdocker.Instructions.Run.exec(Seq("ln", "-s", "/usr/local/sbt/bin/sbt", "/usr/local/bin/sbt")),
     	  sbtdocker.Instructions.Run.exec(Seq("chmod", "0755", "/usr/local/bin/sbt")),
     	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "git")),
     	  sbtdocker.Instructions.Run("cd /usr/local"),
-    	  sbtdocker.Instructions.Run("git clone https://github.com/mrb24/mimir_community_clean.git"),
+    	  sbtdocker.Instructions.Run("git clone https://github.com/UBOdin/mimir.git /usr/local/mimir"),
+		  sbtdocker.Instructions.Run("git clone https://github.com/mrb24/mimir_community_clean.git /usr/local/mimir_community_clean"),
+		  sbtdocker.Instructions.Run("(cd /usr/local/mimir; git checkout -b FixGProMMetadataLookup origin/FixGProMMetadataLookup; sbt publish; sbt publish)"),
+		  sbtdocker.Instructions.Run("cd /usr/local/mimir_community_clean"),
 		  sbtdocker.Instructions.WorkDir("/usr/local/mimir_community_clean"),
-		  sbtdocker.Instructions.Cmd("sbt \"appJVM/run\"")
+		  sbtdocker.Instructions.EntryPoint.exec(Seq("/bin/bash")),
+		  sbtdocker.Instructions.Cmd.exec(Seq("-c", "(cd /usr/local/mimir_community_clean; git pull; sbt appJVM/run)"))
 		)
 		Dockerfile(instructions)
 	}
