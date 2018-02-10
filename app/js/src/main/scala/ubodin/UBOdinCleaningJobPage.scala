@@ -262,8 +262,8 @@ object UBOdinCleaningJobPage extends NetworkInterface {
         getCleaningJobSettingsOptionsResponse(cleaningJobLoadResponse.options, t ) >> 
         getCleaningJobSettingsResponse(cleaningJobLoadResponse.settings, t ) >>
         cleaningJobDataCountResponse(cleaningJobLoadResponse.dataCount, t) >>
-        cleaningJobDataResponse(cleaningJobLoadResponse.data, t) >>
-        cleaningJobTaskListSchemaResponse(cleaningJobLoadResponse.taskListSchema, t))
+        cleaningJobDataResponse(cleaningJobLoadResponse.data, t)) //>>
+        //cleaningJobTaskListSchemaResponse(cleaningJobLoadResponse.taskListSchema, t))
       })
     }
     
@@ -291,6 +291,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
       val url = "/ajax/CleaningJobTaskListSchemaRequest"
       val data = upickle.write(CleaningJobTaskListSchemaRequest(deviceFingerprint,cleaningJobID, operator, cols))
       network.ajaxRequest(url, data, responseText => {
+        println(responseText)
         val cleaningJobTaskListSchemaRespons = upickle.read[CleaningJobTaskListResponse](responseText)
         cleaningJobTaskListSchemaResponse(cleaningJobTaskListSchemaRespons, t)
         //cleaningJobTaskTreeResponse(xhr.responseText, t) 
@@ -351,7 +352,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           println("Load Data: INTERACTIVE")
           s.copy(dataTableState = s.dataTableState.copy(loaded = true, data= newTableData, config = config, perPageRecords = newTableData.data.length ), sliceDiceState = s.sliceDiceState.copy(gbCols = newTableData.cols) )
         }
-      },  pageChange(cleaningJobDataResponse.offset, newTableData.data) )
+      },  pageChange(cleaningJobDataResponse.offset, newTableData.data) >> t.state.flatMap(s => requestCleaningJobTaskListSchema(cleaningJobID, s.dataTableState.data.operator.head, s.dataTableState.data.cols)))
     }
     
     def requestCleaningDataAndCount(cleaningJobID:String, offset:Option[Int] = None, count:Option[Int] = None) : Callback = {
@@ -448,7 +449,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           val data = upickle.write(CleaningJobRepairRequest(deviceFingerprint, cleaningJobID, reason.source, reason.varid.toInt, reason.args, repairValue))
           network.ajaxRequest(url, data, responseText => {
             val cleaningJobRepairRespons = upickle.read[NoResponse](responseText)
-            t.state.flatMap(s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)) >> requestCleaningJobTaskListSchema(cleaningJobID, s.dataTableState.data.operator.head, s.dataTableState.data.cols))
+            t.state.flatMap( s => requestCleaningData(cleaningJobID, s.dataTableState.data.operator, Some(s.dataTableViewState.offset), Some(s.dataTableViewState.rows.length)))
           })
         }
       })
@@ -467,7 +468,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
             val rowIdx = state.dataTableViewState.rows.indexOf(tableRow)
             val colCount = state.dataTableState.data.cols.length
             val targetCellIdx = (colCount*rowIdx)+colIdx
-            Some(state.taskListState.data(state.dataTableViewState.rows.zipWithIndex.foldLeft(-1)((init, row) => {
+            Some(state.taskListState.data.filterNot(task => task.tasks.foldLeft(true)((init,te)=>init&&te.confirmed))(state.dataTableViewState.rows.zipWithIndex.foldLeft(-1)((init, row) => {
               row._1.data.zipWithIndex.foldLeft(init)((initRow, cell) => {
                 println(s"cell: ${cell._1} isDet: ${cell._1.isDet} total: $initRow")
                 if(cell._1.isDet || (((colCount*row._2)+cell._2)>targetCellIdx)) initRow else initRow+1
@@ -499,7 +500,7 @@ object UBOdinCleaningJobPage extends NetworkInterface {
             openRepairDialog(Seq(s.selectedCol.get))
           }
           case CleaningJobTypeState("INTERACTIVE") => {  
-             openRepairDialog(Seq(s.selectedCol.get))
+            openRepairDialog(Seq(s.selectedCol.get))
           }
         
       }))
@@ -854,6 +855,8 @@ object UBOdinCleaningJobPage extends NetworkInterface {
           println(selectedTask)
           tableRowOp match { 
             case Some(tableRow) => {
+              println("-----------------------------------------------------------")
+              println(tableRow)
               val stateDialogActions: ReactNode = js.Array(
                 MuiFlatButton(key = "1", label = "Cancel", secondary = true, onTouchTap = handleDialogCancel)(),
                 MuiFlatButton(key = "2", label = "Repair Manually", secondary = true, onTouchTap = handleDialogManualGPSRepairEntry)()

@@ -187,6 +187,8 @@ object SharedServlet {
       }
       case CleaningJobTaskListSchemaRequest(deviceID, cleaningJobID, operator, cols) =>  {
         val cleaningJobs = getCleaningJobTaskListSchema(deviceID, cleaningJobID, operator, cols)
+        println("----------------------")
+        println(cleaningJobs)
         (CleaningJobTaskListResponse(Vector[CleaningJobTaskGroup]().union(cleaningJobs))) 
       }
       case CleaningJobTaskFocusedListRequest(deviceID, cleaningJobID, operator, rowIds, cols) =>  {
@@ -448,7 +450,12 @@ object SharedServlet {
                 rows.map(row => CleaningJobTaskGroup(MimirCommunityServer.explainSubsetWithoutSchema(oper, Seq(row), cols).map(reasonSet => {
                  reasonSet.all(MimirVizier.db).map(reason => { 
                    //upickle.read[CleaningJobTask](reason.toJSON)
-                   CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reason.args.map( _.toString).toList, reason.guess.toString, reason.confirmed )
+                   //TODO: mega hack for reason not having proper rowid for branched 
+                   val reasonArgs = reason.model.name match {
+                     case "LENS_COMMENT1142014187:LATITUDE_LONGITUDE" => reason.args.map( arg => "2|"+arg.asString).toList
+                     case _ => reason.args.map( _.toString).toList
+                   }
+                   CleaningJobTask(reason.model.name, reason.idx, reason.reason, containRepair(reason.repair), reasonArgs, reason.guess.toString, reason.confirmed )
                  })
                }).flatten.toList))
               }
@@ -629,7 +636,9 @@ object SharedServlet {
          sql"select * from CLEANING_JOB_DATA WHERE CLEANING_JOB_ID = $cleaningJobID"// don't worry, prevents SQL injection
            .map(rs => {
              val query = assembleCleaningJobDataQuery(deviceID, rs.int("CLEANING_JOB_DATA_ID"))
-             val oper = replaceCastExpression(MimirVizier.db.compiler.optimize(MimirVizier.db.views.resolve(MimirVizier.db.compiler.optimize(query.project(query.columnNames.head))))).count(false)
+             val fastCount = rs.int("FAST_COUNT")
+             val pop = MimirVizier.db.compiler.optimize(MimirVizier.db.views.resolve(MimirVizier.db.compiler.optimize(query.project(query.columnNames.head))))
+             val oper = if(fastCount == 0) pop.count(false) else replaceCastExpression(pop).count(false)
              //println(oper)
              val queryRes = MimirCommunityServer.queryMimir(oper)
              queryRes._2.headOption match {
@@ -1186,6 +1195,7 @@ object MimirCommunityServer {
         val theModel = MimirVizier.db.models.get(model)
         val repairArgs = args.zip(theModel.argTypes(idx)).map(argTyp => TextUtils.parsePrimitive(argTyp._2, argTyp._1))
         val repairPrimitive = TextUtils.parsePrimitive(theModel.varType(idx, repairArgs.map(_.getType)),repairValue)
+        println(s"model: $model repairArgs: $repairArgs repairPrim: $repairPrimitive")
         theModel match {
           case sourcedFeedbackModel:SourcedFeedbackT[Any] => {
             mimir.models.FeedbackSource.feedbackSource = FeedbackSourceIdentifier(deviceID, SharedServlet.getUserName(deviceID))

@@ -14,7 +14,7 @@ raw(UBOdinClientAppCSS.cssStr)
 body(
 div(id := "container"),
 raw(UBOdinClientAppLoadingScript.scriptStr),
-raw(UBOdinUserEventTracker.scriptStr),
+//raw(UBOdinUserEventTracker.scriptStr),
 script(`type` := "text/javascript", src := "app/bundles/index-bundle.js"),
 script(`type` := "text/javascript", src := "js/app-fastopt.js"),
 script(`type` := "text/javascript", src := "app/bundles/material_ui-bundle.js"),
