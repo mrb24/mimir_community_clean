@@ -76,7 +76,8 @@ val app = crossProject.settings(
 	"org.scala-lang" % "scala-reflect" % scalaVersion.value,
     "org.scala-lang" % "scala-compiler" % scalaVersion.value % Provided,
     "org.xerial"     %   "sqlite-jdbc"  % "3.16.1",
-  	"info.mimirdb" %% "mimir-core" % "0.2",
+  	"javax.media"	%   "jai_core"	% "1.1.3" from "http://download.osgeo.org/webdav/geotools/javax/media/jai_core/1.1.3/jai_core-1.1.3.jar",  
+    "info.mimirdb" %% "mimir-core" % "0.2" exclude("javax.media", "jai_core"),
   	//spark ml
     "org.apache.spark" % "spark-sql_2.11" % "2.2.0",
     "org.apache.spark" % "spark-mllib_2.11" % "2.2.0",
@@ -94,32 +95,40 @@ lazy val appJVM = app.jvm.settings(
   (resources in Compile) += (fastOptJS in (appJS, Compile)).value.data
 )
 
-//lazy val buildDockerImage = inputKey[Unit]("build DockerImage")
-//buildDockerImage := {
-	//import sbtdocker.Instructions._
-    import sbtdocker._
-	enablePlugins(DockerPlugin)
-	dockerfile in docker := {
-		val instructions = Seq(
-		  sbtdocker.Instructions.From("frolvlad/alpine-oraclejdk8"),
-		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "bash")),
-		  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "curl")),
-          //sbtdocker.Instructions.Run("curl -sL \"http://dl.bintray.com/sbt/native-packages/sbt/0.13.15/sbt-0.13.15.tgz\" | gunzip | tar -x -C /usr/local"),
-    	  sbtdocker.Instructions.Run("curl -sL \"https://github.com/sbt/sbt/releases/download/v0.13.15/sbt-0.13.15.tgz\" | gunzip | tar -x -C /usr/local"),
-    	  sbtdocker.Instructions.Run.exec(Seq("ln", "-s", "/usr/local/sbt/bin/sbt", "/usr/local/bin/sbt")),
-    	  sbtdocker.Instructions.Run.exec(Seq("chmod", "0755", "/usr/local/bin/sbt")),
-    	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "git")),
-    	  sbtdocker.Instructions.Run("cd /usr/local"),
-    	  sbtdocker.Instructions.Run("git clone https://github.com/UBOdin/mimir.git /usr/local/mimir"),
-		  sbtdocker.Instructions.Run("git clone https://github.com/mrb24/mimir_community_clean.git /usr/local/mimir_community_clean"),
-		  sbtdocker.Instructions.Run("(cd /usr/local/mimir; git checkout -b FixGProMMetadataLookup origin/FixGProMMetadataLookup; sbt publish; sbt publish)"),
-		  sbtdocker.Instructions.Run("cd /usr/local/mimir_community_clean"),
-		  sbtdocker.Instructions.WorkDir("/usr/local/mimir_community_clean"),
-		  sbtdocker.Instructions.EntryPoint.exec(Seq("/bin/bash")),
-		  sbtdocker.Instructions.Cmd.exec(Seq("-c", "(cd /usr/local/mimir_community_clean; git pull; sbt appJVM/run)"))
+import sbtdocker._
+enablePlugins(DockerPlugin)
+dockerfile in docker := {
+    val userDataVolMountPoint = "/usr/local/source/"
+    val sbtPath = s"${userDataVolMountPoint}sbt/bin/sbt"
+	val initContainer = Seq(
+		s"if [ -e ${userDataVolMountPoint}initComplete ]",
+		"then", 
+		    "echo 'already initialized...'",
+			s"(cd ${userDataVolMountPoint}mimir_community_clean; git pull; ${sbtPath} appJVM/run)",
+		"else",
+			s"""curl -sL "https://github.com/sbt/sbt/releases/download/v0.13.15/sbt-0.13.15.tgz" | gunzip | tar -x -C ${userDataVolMountPoint}""",
+			s"chmod 0755 ${sbtPath}",
+			s"git clone https://github.com/UBOdin/mimir.git ${userDataVolMountPoint}mimir",
+			s"git clone https://github.com/mrb24/mimir_community_clean.git ${userDataVolMountPoint}mimir_community_clean",
+			s"(cd ${userDataVolMountPoint}mimir; git checkout -b FixGProMMetadataLookup origin/FixGProMMetadataLookup; ${sbtPath} publish)",
+			s"touch ${userDataVolMountPoint}initComplete",
+			"echo 'initialization complete...'",
+			s"(cd ${userDataVolMountPoint}mimir_community_clean; git pull; ${sbtPath} appJVM/run)",
+		"fi"
 		)
-		Dockerfile(instructions)
-	}
-//}
+		
+	val instructions = Seq(
+	  sbtdocker.Instructions.From("docker.mimirdb.info/alpine_oraclejdk8"),
+	  sbtdocker.Instructions.Volume(Seq(s"type=volume,source=mimir-vol,target=${userDataVolMountPoint}")),
+	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "bash")),
+	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "curl")),
+	  sbtdocker.Instructions.Run.exec(Seq("apk", "add", "--no-cache", "git")),
+	  sbtdocker.Instructions.Run.exec(Seq("mkdir", s"${userDataVolMountPoint}")),
+	  sbtdocker.Instructions.Run(s"""( ${initContainer.map(el => s"""echo "$el" >> ${userDataVolMountPoint}initContainer.sh; """).mkString("") } chmod 0755 ${userDataVolMountPoint}initContainer.sh)"""),
+	  sbtdocker.Instructions.EntryPoint.exec(Seq("/bin/bash", "-c", s"${userDataVolMountPoint}initContainer.sh"))
+	)
+	Dockerfile(instructions)
+}
+
 
 
