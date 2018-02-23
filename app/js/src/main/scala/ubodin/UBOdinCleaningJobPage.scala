@@ -18,7 +18,6 @@ import scala.scalajs.js.Date
 import scala.util.{Failure, Success}
 import ubodin.UBOdinAppRouter.Page
 import org.scalajs.dom.ext.Ajax
-import jdk.nashorn.internal.runtime.Undefined
 import ubodin.ODInTable.Model
 import scalacss.Defaults._
 import scalacss.ScalaCssReact._
